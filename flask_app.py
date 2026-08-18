@@ -72,6 +72,44 @@ def fetch_movie_news():
         items = []
         for item in root.findall('.//channel/item')[:9]:
             title = item.find('title').text if item.find('title') is not None else 'Cinema News'
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                genre TEXT DEFAULT '',
+                status TEXT NOT NULL,
+                score INTEGER DEFAULT 0,
+                poster_url TEXT DEFAULT '',
+                comments TEXT DEFAULT '',
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+
+        cursor.execute("PRAGMA table_info(movies)")
+        cols = [col[1] for col in cursor.fetchall()]
+        if "poster_url" not in cols:
+            cursor.execute("ALTER TABLE movies ADD COLUMN poster_url TEXT DEFAULT ''")
+        if "comments" not in cols:
+            cursor.execute("ALTER TABLE movies ADD COLUMN comments TEXT DEFAULT ''")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+
+init_db()
+
+# Automated News Fetcher (Google News RSS)
+def fetch_movie_news():
+    try:
+        url = "https://news.google.com/rss/search?q=movies+cinema+casting+box+office&hl=en-US&gl=US&ceid=US:en"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            xml_data = response.read()
+
+        root = ET.fromstring(xml_data)
+        items = []
+        for item in root.findall('.//channel/item')[:9]:
+            title = item.find('title').text if item.find('title') is not None else 'Cinema News'
             link = item.find('link').text if item.find('link') is not None else '#'
             pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
 
