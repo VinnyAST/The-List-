@@ -44,12 +44,16 @@ def fetch_recommended_movies():
                     'poster': item.get('artworkUrl100', '').replace('100x100bb', '600x600bb'),
                     'genre': 'Top Rated'
                 })
-            return results
+            if results:
+                return results
     except Exception:
-        return [
-            {'title': 'Inception', 'poster': 'https://is1-ssl.mzstatic.com/image/thumb/Video115/v4/71/84/6b/71846b76-a496-512c-98a9-46738927909b/pr_source.lsr/600x600bb.jpg', 'genre': 'Sci-Fi'},
-            {'title': 'The Dark Knight', 'poster': 'https://is1-ssl.mzstatic.com/image/thumb/Video125/v4/7c/41/49/7c414966-238d-8a5b-6f8d-635b7190135d/pr_source.lsr/600x600bb.jpg', 'genre': 'Action'}
-        ]
+        pass
+    # Updated recent blockbusters fallback
+    return [
+        {'title': 'Superman (2025)', 'poster': '', 'genre': 'Action'},
+        {'title': 'Jurassic World Rebirth', 'poster': '', 'genre': 'Adventure'},
+        {'title': 'Zootopia 2', 'poster': '', 'genre': 'Animation'}
+    ]
 
 def fetch_upcoming_movies():
     try:
@@ -63,13 +67,18 @@ def fetch_upcoming_movies():
                     'title': item.get('name'),
                     'poster': item.get('artworkUrl100', '').replace('100x100bb', '600x600bb')
                 })
-            return results
+            if results:
+                return results
     except Exception:
-        return []
+        pass
+    return [
+        {'title': 'Avatar 3', 'poster': ''},
+        {'title': 'Avengers: Doomsday', 'poster': ''}
+    ]
 
 def fetch_movie_news():
     try:
-        url = "https://news.google.com/rss/search?q=movie+releases+hollywood&hl=en-US&gl=US&ceid=US:en"
+        url = "https://news.google.com/rss/search?q=latest+movies+hollywood+releases+2026&hl=en-US&gl=US&ceid=US:en"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=4) as response:
             root = ET.fromstring(response.read())
@@ -83,13 +92,16 @@ def fetch_movie_news():
                     'title': title.text if title is not None else 'News Update',
                     'link': link.text if link is not None else '#',
                     'date': pubDate.text[:16] if pubDate is not None and pubDate.text else '',
-                    'source': source.text if source is not None else 'Cinema Web'
+                    'source': source.text if source is not None else 'Box Office'
                 })
-            return news
+            if news:
+                return news
     except Exception:
-        return [{'title': 'Hollywood Box Office Reaches New Milestones', 'link': '#', 'date': 'Today', 'source': 'Box Office Mojo'}]
+        pass
+    return [{'title': 'Global Box Office Hits Record Openings', 'link': '#', 'date': 'Today', 'source': 'Cinema News'}]
 
-LOGO_SVG = '<svg width="22" height="14" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="6"/><circle cx="17" cy="7" r="6"/></svg>'
+# Custom 3-ring logo matching your design
+LOGO_SVG = '<svg width="45" height="16" viewBox="0 0 54 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="3.5"/><circle cx="27" cy="10" r="9" stroke="currentColor" stroke-width="3.5"/><circle cx="44" cy="10" r="7.5" stroke="currentColor" stroke-width="3.5"/></svg>'
 
 BASE_CSS = """
 <style>
@@ -109,7 +121,7 @@ body { background-color: var(--bg-primary); color: var(--text-primary); min-heig
 .view-icon { cursor: pointer; padding: 4px 10px; font-size: 0.9rem; color: var(--text-muted); border-radius: 6px; }
 .view-icon.active { background: var(--bg-secondary); color: var(--text-primary); }
 .app-select-container { margin-bottom: 24px; }
-.app-select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px; font-size: 0.85rem; outline: none; }
+.app-select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 16px; border-radius: 8px; font-size: 0.85rem; outline: none; width: 100%; max-width: 250px; }
 .app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
 .app-card { background: var(--bg-card); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); position: relative; display: flex; flex-direction: column; height: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .app-card img { width: 100%; height: 100%; object-fit: cover; }
@@ -118,12 +130,12 @@ body { background-color: var(--bg-primary); color: var(--text-primary); min-heig
 .card-meta { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-muted); }
 .score-star { color: #ca8a04; }
 .edit-badge { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; cursor: pointer; z-index: 2; border: 1px solid var(--border); }
-.btn-app { background: var(--text-primary); color: var(--bg-primary); border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; text-decoration: none; display: inline-block; transition: opacity 0.2s; }
+.btn-app { background: var(--text-primary); color: var(--bg-primary); border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; text-decoration: none; display: inline-block; transition: opacity 0.2s; text-align: center; }
 .btn-app:hover { opacity: 0.8; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
 .modal-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 440px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
 .modal-card input, .modal-card select, .modal-card textarea { width: 100%; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 12px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 12px; outline: none; }
-.auth-wrapper { max-width: 380px; margin: auto; padding: 40px 20px; display: flex; flex-direction: column; justify-content: center; flex: 1; }
+.auth-wrapper { max-width: 380px; margin: auto; padding: 40px 20px; display: flex; flex-direction: column; justify-content: center; flex: 1; width: 100%; }
 .news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
 .news-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 180px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
 .news-source { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; }
@@ -133,6 +145,16 @@ body { background-color: var(--bg-primary); color: var(--text-primary); min-heig
 .app-list-table { width: 100%; border-collapse: collapse; background: var(--bg-card); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
 .app-list-table th, .app-list-table td { padding: 14px 16px; text-align: left; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
 .app-list-table th { background: var(--bg-secondary); font-weight: 600; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+
+/* Android / Mobile Optimizations */
+@media (max-width: 768px) {
+    .app-header { padding: 16px 20px; }
+    .container { padding: 20px 16px; }
+    .app-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .app-card { height: 220px; }
+    .news-grid { grid-template-columns: 1fr; }
+    .landing-title { font-size: 2.2rem !important; }
+}
 </style>
 """
 AUTH_TEMPLATE = """
@@ -140,6 +162,7 @@ AUTH_TEMPLATE = """
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The List - Authentication</title>
     {{ css|safe }}
 </head>
@@ -151,8 +174,8 @@ AUTH_TEMPLATE = """
         <h2 style="margin-bottom: 24px; font-weight: 500; font-size: 1.5rem;">{{ title }}</h2>
         {% if error %}<p style="color: #ef4444; font-size: 0.85rem; margin-bottom: 16px;">{{ error }}</p>{% endif %}
         <form method="POST">
-            <input type="text" name="username" placeholder="Username" required style="width:100%; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-primary); padding:12px; border-radius:8px; font-size:0.85rem; margin-bottom:12px; outline:none;">
-            <input type="password" name="password" placeholder="Password" required style="width:100%; background:var(--bg-secondary); border:1px solid var(--border); color:var(--text-primary); padding:12px; border-radius:8px; font-size:0.85rem; margin-bottom:20px; outline:none;">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="password" name="password" placeholder="Password" required style="margin-bottom: 20px;">
             <button type="submit" class="btn-app" style="width: 100%;">{{ title }}</button>
         </form>
         <p style="margin-top: 20px; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
@@ -162,12 +185,12 @@ AUTH_TEMPLATE = """
 </body>
 </html>
 """
-
 INDEX_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The List</title>
     {{ css|safe }}
 </head>
@@ -176,11 +199,11 @@ INDEX_TEMPLATE = """
         <a href="/" class="brand-logo">{{ logo|safe }} THE LIST</a>
         <div class="app-user-actions">
             {% if username %}
-                <button onclick="openModal()" class="btn-app">+ Add Title</button>
-                <span style="font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">{{ username }}</span>
-                <a href="/logout" style="font-size: 0.85rem; color: var(--text-muted); text-decoration: none;">Exit</a>
+                <button onclick="openModal()" class="btn-app" style="padding: 8px 16px;">+ Add</button>
+                <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase;">{{ username }}</span>
+                <a href="/logout" style="font-size: 0.8rem; color: var(--text-muted); text-decoration: none;">Exit</a>
             {% else %}
-                <a href="/login" style="font-size: 0.85rem; font-weight: 600; text-decoration: none; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px;">Log In</a>
+                <a href="/login" style="font-size: 0.8rem; font-weight: 600; text-decoration: none; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px;">Log In</a>
             {% endif %}
         </div>
     </header>
@@ -215,7 +238,7 @@ INDEX_TEMPLATE = """
                 {% for m in movies %}
                 <div class="app-card" data-genre="{{ m.genre }}">
                     <div class="edit-badge" onclick="openEditModal('{{ m.id }}', '{{ m.title }}', '{{ m.genre }}', '{{ m.status }}', '{{ m.score }}', '{{ m.poster_url }}', '{{ m.comments }}')">&#9998;</div>
-                    <img src="{{ m.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ m.title }}">
+                    <img src="{{ m.poster_url or 'https://placehold.co/300x450/e4e4e7/71717a?text=No+Poster' }}" alt="{{ m.title }}">
                     <div class="card-overlay">
                         <div class="card-title">{{ m.title }}</div>
                         <div class="card-meta">
@@ -225,7 +248,7 @@ INDEX_TEMPLATE = """
                     </div>
                 </div>
                 {% else %}
-                <p style="color: var(--text-muted); font-size: 0.85rem;">Your list is empty. Click "+ Add Title" to begin.</p>
+                <p style="color: var(--text-muted); font-size: 0.85rem;">Your list is empty. Click "+ Add" to begin.</p>
                 {% endfor %}
             </div>
 
@@ -255,7 +278,7 @@ INDEX_TEMPLATE = """
             <div class="app-grid" style="margin-bottom: 40px;">
                 {% for rec in recommended %}
                 <div class="app-card" onclick="quickAdd('{{ rec.title }}', '{{ rec.poster }}', '{{ rec.genre }}')" style="cursor: pointer;">
-                    <img src="{{ rec.poster }}" alt="{{ rec.title }}">
+                    <img src="{{ rec.poster or 'https://placehold.co/300x450/e4e4e7/71717a?text=Latest+Movie' }}" alt="{{ rec.title }}">
                     <div class="card-overlay">
                         <div class="card-title">{{ rec.title }}</div>
                         <div class="card-meta"><span>Click to Track</span></div>
@@ -268,7 +291,7 @@ INDEX_TEMPLATE = """
             <div class="app-grid">
                 {% for up in upcoming %}
                 <div class="app-card" onclick="quickAdd('{{ up.title }}', '{{ up.poster }}', 'Upcoming')" style="cursor: pointer;">
-                    <img src="{{ up.poster }}" alt="{{ up.title }}">
+                    <img src="{{ up.poster or 'https://placehold.co/300x450/e4e4e7/71717a?text=Upcoming' }}" alt="{{ up.title }}">
                     <div class="card-overlay">
                         <div class="card-title">{{ up.title }}</div>
                         <div class="card-meta"><span>Coming Soon</span></div>
@@ -298,19 +321,19 @@ INDEX_TEMPLATE = """
         </div>
 
         {% else %}
-        <!-- EXACT LANDING PAGE FOR LOGGED OUT -->
-        <div style="padding: 40px 0;">
-            <h1 style="font-size: 3.2rem; font-weight: 400; letter-spacing: -1.5px; margin-bottom: 12px; line-height: 1.1;">Track the action.<br>Track the list.</h1>
-            <p style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600;">Movies • Reviews • Live News + Upcoming.</p>
-            <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 24px;">Start organizing your cinema collection today.</p>
-            <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 50px;">
+        <!-- LANDING PAGE -->
+        <div style="padding: 20px 0;">
+            <h1 class="landing-title" style="font-size: 2.8rem; font-weight: 400; letter-spacing: -1.5px; margin-bottom: 12px; line-height: 1.1;">Track the action.<br>Track the list.</h1>
+            <p style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600;">Movies • Reviews • Live News + Upcoming.</p>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px;">Start organizing your cinema collection today.</p>
+            <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 40px; flex-wrap: wrap;">
                 <a href="/register" class="btn-app">Get Started</a>
-                <a href="/login" style="color: var(--text-primary); text-decoration: none; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid var(--text-primary); padding-bottom: 2px;">Learn More</a>
+                <a href="/login" style="color: var(--text-primary); text-decoration: none; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid var(--text-primary); padding-bottom: 2px;">Log In</a>
             </div>
             
             <div style="display: flex; gap: 16px; overflow-x: auto; padding-bottom: 20px;">
-                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);"><img src="https://is1-ssl.mzstatic.com/image/thumb/Video115/v4/71/84/6b/71846b76-a496-512c-98a9-46738927909b/pr_source.lsr/600x600bb.jpg" style="width:100%; height:100%; object-fit:cover;"></div>
-                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);"><img src="https://is1-ssl.mzstatic.com/image/thumb/Video125/v4/7c/41/49/7c414966-238d-8a5b-6f8d-635b7190135d/pr_source.lsr/600x600bb.jpg" style="width:100%; height:100%; object-fit:cover;"></div>
+                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.75rem; text-align: center; padding: 10px;">Poster Placeholder 1</div>
+                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.75rem; text-align: center; padding: 10px;">Poster Placeholder 2</div>
             </div>
         </div>
         {% endif %}
@@ -421,6 +444,7 @@ INDEX_TEMPLATE = """
 </body>
 </html>
 """
+
 @app.route("/")
 def index():
     if "user_id" not in session:
