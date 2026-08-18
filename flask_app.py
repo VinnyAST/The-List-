@@ -89,16 +89,16 @@ def fetch_movie_news():
     except Exception:
         return [{'title': 'Hollywood Box Office Reaches New Milestones', 'link': '#', 'date': 'Today', 'source': 'Box Office Mojo'}]
 
-LOGO_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19.82 2H4.18C2.98 2 2 2.98 2 4.18v15.64C2 21.02 2.98 22 4.18 22h15.64c1.2 0 2.18-.98 2.18-2.18V4.18C22 2.98 21.02 2 19.82 2zM7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></svg>'
+LOGO_SVG = '<svg width="22" height="14" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="6"/><circle cx="17" cy="7" r="6"/></svg>'
 
 BASE_CSS = """
 <style>
 :root { --bg-primary: #ffffff; --bg-secondary: #f4f4f5; --bg-card: #ffffff; --text-primary: #09090b; --text-muted: #71717a; --accent: #000000; --border: #e4e4e7; }
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 body { background-color: var(--bg-primary); color: var(--text-primary); min-height: 100vh; display: flex; flex-direction: column; }
-.app-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
-.brand-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.1rem; letter-spacing: 2px; text-decoration: none; color: var(--text-primary); }
-.app-user-actions { display: flex; align-items: center; gap: 16px; }
+.app-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 32px; border-bottom: 1px solid var(--border); background: var(--bg-primary); }
+.brand-logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1rem; letter-spacing: 2px; text-decoration: none; color: var(--text-primary); }
+.app-user-actions { display: flex; align-items: center; gap: 20px; }
 .container { max-width: 1200px; margin: 0 auto; padding: 32px 20px; width: 100%; flex: 1; }
 .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 32px; overflow-x: auto; padding-bottom: 8px; }
 .nav-tab { background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border-radius: 6px; white-space: nowrap; transition: 0.2s; }
@@ -118,7 +118,7 @@ body { background-color: var(--bg-primary); color: var(--text-primary); min-heig
 .card-meta { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-muted); }
 .score-star { color: #ca8a04; }
 .edit-badge { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.9); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; cursor: pointer; z-index: 2; border: 1px solid var(--border); }
-.btn-app { background: var(--text-primary); color: var(--bg-primary); border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; cursor: pointer; text-decoration: none; display: inline-block; transition: opacity 0.2s; }
+.btn-app { background: var(--text-primary); color: var(--bg-primary); border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; text-decoration: none; display: inline-block; transition: opacity 0.2s; }
 .btn-app:hover { opacity: 0.8; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
 .modal-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 440px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
@@ -180,7 +180,7 @@ INDEX_TEMPLATE = """
                 <span style="font-size: 0.85rem; font-weight: 600; text-transform: uppercase;">{{ username }}</span>
                 <a href="/logout" style="font-size: 0.85rem; color: var(--text-muted); text-decoration: none;">Exit</a>
             {% else %}
-                <a href="/login" class="btn-app">Log In</a>
+                <a href="/login" style="font-size: 0.85rem; font-weight: 600; text-decoration: none; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px;">Log In</a>
             {% endif %}
         </div>
     </header>
@@ -298,11 +298,20 @@ INDEX_TEMPLATE = """
         </div>
 
         {% else %}
-        <!-- LANDING PAGE FOR LOGGED OUT -->
-        <div style="padding: 60px 0; text-align: center;">
-            <h1 style="font-size: 3rem; font-weight: 400; letter-spacing: -1px; margin-bottom: 16px;">Track the action.<br>Track the list.</h1>
-            <p style="color: var(--text-muted); font-size: 1rem; margin-bottom: 32px;">Start organizing your cinema collection today.</p>
-            <a href="/register" class="btn-app" style="padding: 14px 28px; font-size: 0.9rem;">Get Started</a>
+        <!-- EXACT LANDING PAGE FOR LOGGED OUT -->
+        <div style="padding: 40px 0;">
+            <h1 style="font-size: 3.2rem; font-weight: 400; letter-spacing: -1.5px; margin-bottom: 12px; line-height: 1.1;">Track the action.<br>Track the list.</h1>
+            <p style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600;">Movies • Reviews • Live News + Upcoming.</p>
+            <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 24px;">Start organizing your cinema collection today.</p>
+            <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 50px;">
+                <a href="/register" class="btn-app">Get Started</a>
+                <a href="/login" style="color: var(--text-primary); text-decoration: none; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid var(--text-primary); padding-bottom: 2px;">Learn More</a>
+            </div>
+            
+            <div style="display: flex; gap: 16px; overflow-x: auto; padding-bottom: 20px;">
+                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);"><img src="https://is1-ssl.mzstatic.com/image/thumb/Video115/v4/71/84/6b/71846b76-a496-512c-98a9-46738927909b/pr_source.lsr/600x600bb.jpg" style="width:100%; height:100%; object-fit:cover;"></div>
+                <div style="min-width: 140px; height: 210px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);"><img src="https://is1-ssl.mzstatic.com/image/thumb/Video125/v4/7c/41/49/7c414966-238d-8a5b-6f8d-635b7190135d/pr_source.lsr/600x600bb.jpg" style="width:100%; height:100%; object-fit:cover;"></div>
+            </div>
         </div>
         {% endif %}
     </div>
@@ -412,7 +421,6 @@ INDEX_TEMPLATE = """
 </body>
 </html>
 """
-
 @app.route("/")
 def index():
     if "user_id" not in session:
