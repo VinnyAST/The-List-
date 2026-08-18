@@ -339,6 +339,7 @@ MAIN_TEMPLATE = f"""
 </form>
 </div>
 </div>
+MAIN_TEMPLATE = f"""
 <script>
 function switchNavTab(tab) {
 ['library', 'search', 'news', 'upcoming', 'recommended'].forEach(t => {
@@ -407,7 +408,6 @@ resultsContainer.appendChild(card);
 </body>
 </html>
 """
-
 @app.route("/")
 def index():
     if "user_id" not in session: return render_template_string(LANDING_TEMPLATE)
