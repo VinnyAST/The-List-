@@ -339,7 +339,7 @@ MAIN_TEMPLATE = f"""
 </form>
 </div>
 </div>
-MAIN_TEMPLATE = f"""
+MAIN_TEMPLATE = """
 <script>
 function switchNavTab(tab) {
 ['library', 'search', 'news', 'upcoming', 'recommended'].forEach(t => {
@@ -420,7 +420,9 @@ def index():
         cursor.execute("SELECT * FROM movies WHERE user_id = ? AND status = ?", (session["user_id"], filter_status))
     movies = cursor.fetchall()
     conn.close()
-    return render_template_string(MAIN_TEMPLATE, movies=movies, username=session["username"], current_filter=filter_status, recommendations=fetch_recommended_movies(), upcoming=fetch_upcoming_movies(), news_items=fetch_movie_news())
+    
+    page_html = MAIN_TEMPLATE.replace("{BASE_CSS}", BASE_CSS).replace("{LOGO_SVG}", LOGO_SVG)
+    return render_template_string(page_html, movies=movies, username=session["username"], current_filter=filter_status, recommendations=fetch_recommended_movies(), upcoming=fetch_upcoming_movies(), news_items=fetch_movie_news())
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
