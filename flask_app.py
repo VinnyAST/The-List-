@@ -6,13 +6,12 @@ import urllib.parse
 import csv
 import io
 import xml.etree.ElementTree as ET
-from flask import Flask, redirect, render_template_string, request, session, url_for, Response
+from flask import Flask, redirect, render_template_string, request, session, url_for, Response, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "the_list_secret_key_98765_change_me"
 
-# SQLite DB Setup
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "movie_tracker.db")
 
@@ -30,7 +29,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                avatar TEXT DEFAULT '⚡'
             )
         """)
 
@@ -55,14 +55,17 @@ def init_db():
         if "comments" not in cols:
             cursor.execute("ALTER TABLE movies ADD COLUMN comments TEXT DEFAULT ''")
 
+        cursor.execute("PRAGMA table_info(users)")
+        user_cols = [col[1] for col in cursor.fetchall()]
+        if "avatar" not in user_cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT '⚡'")
+
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"Database initialization error: {e}")
 
 init_db()
-
-# Automated News Fetcher (Google News RSS)
 def fetch_movie_news():
     try:
         url = "https://news.google.com/rss/search?q=movies+cinema+casting+box+office&hl=en-US&gl=US&ceid=US:en"
@@ -137,32 +140,30 @@ def fetch_upcoming_movies():
         items = []
         for movie in data.get('results', [])[:12]:
             poster_path = movie.get('poster_path')
+            movie_id = movie.get('id')
+            
+            trailer_key = ""
+            try:
+                v_url = f"https://api.themoviedb.org/3/movie/{movie_id}/videos?api_key={TMDB_API_KEY}&language=en-US"
+                v_req = urllib.request.Request(v_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(v_req, timeout=3) as v_resp:
+                    v_data = json.loads(v_resp.read().decode('utf-8'))
+                    for vid in v_data.get('results', []):
+                        if vid.get('site') == 'YouTube' and vid.get('type') == 'Trailer':
+                            trailer_key = vid.get('key')
+                            break
+                    if not trailer_key and v_data.get('results'):
+                        trailer_key = v_data.get('results')[0].get('key')
+            except Exception:
+                pass
+
             items.append({
-                "id": movie.get('id'),
+                "id": movie_id,
                 "title": movie.get('title', 'Untitled'),
                 "release": movie.get('release_date', 'Coming Soon'),
-                "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450"
-            })
-        return items
-    except Exception:
-        return []
-
-def fetch_recommended_movies():
-    try:
-        url = f"https://api.themoviedb.org/3/movie/top_rated?api_key={TMDB_API_KEY}&language=en-US&page=1"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            
-        items = []
-        for movie in data.get('results', [])[:12]:
-            poster_path = movie.get('poster_path')
-            items.append({
-                "id": movie.get('id'),
-                "title": movie.get('title', 'Untitled'),
-                "genre": "Top Rated",
-                "score": round(float(movie.get('vote_average', 0)), 1),
-                "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450"
+                "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450",
+                "overview": movie.get('overview', 'No overview available.'),
+                "trailer_key": trailer_key
             })
         return items
     except Exception:
@@ -321,7 +322,7 @@ BASE_CSS = """
     .app-card {
         position: relative; aspect-ratio: 2 / 3;
         background: var(--card-bg); border: 1px solid var(--border);
-        overflow: hidden;
+        overflow: hidden; cursor: pointer;
     }
 
     .app-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -341,14 +342,14 @@ BASE_CSS = """
         border: none; padding: 10px 18px; font-weight: 700;
         font-size: 0.75rem; letter-spacing: 1.5px;
         text-transform: uppercase; cursor: pointer;
-        text-decoration: none; display: inline-block;
+        text-decoration: none; display: inline-block; text-align: center;
     }
 
     .btn-secondary-app {
         background: transparent; color: var(--text-primary);
         border: 1px solid var(--border); padding: 9px 14px;
         font-weight: 600; font-size: 0.72rem;
-        letter-spacing: 1px; text-transform: uppercase; cursor: pointer;
+        letter-spacing: 1px; text-transform: uppercase; cursor: pointer; text-align: center;
     }
 
     .theme-selector {
@@ -373,9 +374,27 @@ BASE_CSS = """
     }
     .modal-content {
         background: var(--card-bg); border: 1px solid var(--border);
-        padding: 24px; width: 90%; max-width: 450px;
-        color: var(--text-primary);
+        padding: 24px; width: 90%; max-width: 480px;
+        color: var(--text-primary); max-height: 90vh; overflow-y: auto;
     }
+</style>
+"""
+
+AUTH_CSS = """
+<style>
+    body {
+        display: flex; justify-content: center; align-items: center;
+        min-height: 100vh; background: var(--bg); color: var(--text-primary);
+    }
+    .auth-card {
+        background: var(--card-bg); border: 1px solid var(--border);
+        padding: 36px; width: 100%; max-width: 420px; text-align: center;
+    }
+    .auth-card h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 20px; letter-spacing: 1px; }
+    .auth-card input { margin-bottom: 14px; }
+    .auth-card button { width: 100%; padding: 12px; margin-top: 6px; }
+    .auth-link { display: block; margin-top: 18px; font-size: 0.75rem; color: var(--text-muted); text-decoration: none; }
+    .error-banner { background: rgba(220, 38, 38, 0.1); color: #dc2626; border: 1px solid #dc2626; padding: 10px; font-size: 0.75rem; margin-bottom: 16px; }
 </style>
 """
 APP_TEMPLATE = """
@@ -393,6 +412,9 @@ APP_TEMPLATE = """
         <a href="/" class="brand-logo">
             """ + LOGO_SVG + """ <span>THE LIST</span>
         </a>
+        <div style="font-size: 1.1rem; background: var(--card-bg); border: 1px solid var(--border); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">
+            {{ user_avatar if user_avatar else '⚡' }}
+        </div>
     </header>
 
     <div class="container">
@@ -405,6 +427,7 @@ APP_TEMPLATE = """
             </div>
 
             <form method="GET" action="/dashboard" class="filter-bar">
+                <input type="hidden" name="tab" value="collection">
                 <select name="status" class="app-select" onchange="this.form.submit()">
                     <option value="ALL" {% if current_status == 'ALL' %}selected{% endif %}>STATUS: ALL</option>
                     <option value="WATCHED" {% if current_status == 'WATCHED' %}selected{% endif %}>WATCHED</option>
@@ -482,7 +505,7 @@ APP_TEMPLATE = """
             </div>
             <div class="app-grid">
                 {% for movie in upcoming_movies %}
-                    <div class="app-card">
+                    <div class="app-card" onclick='openUpcomingModal({{ movie | tojson | safe }})'>
                         <img src="{{ movie.poster }}" alt="{{ movie.title }}">
                         <div class="card-overlay">
                             <div class="card-title">{{ movie.title }}</div>
@@ -496,24 +519,13 @@ APP_TEMPLATE = """
             </div>
         </div>
 
-        <!-- TAB 5: DATA -->
-        <div id="data-view" class="tab-content">
-            <div class="app-title-bar">
-                <h2>Manage Data</h2>
-            </div>
-            <div style="background: var(--card-bg); border: 1px solid var(--border); padding: 24px; max-width: 500px;">
-                <h3 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px;">Export Backup</h3>
-                <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 18px;">Download your collection backup in CSV format.</p>
-                <a href="/export_csv" class="btn-app">DOWNLOAD CSV</a>
-            </div>
-        </div>
-
-        <!-- TAB 6: SETTINGS -->
+        <!-- TAB 5: SETTINGS & DATA -->
         <div id="settings-view" class="tab-content">
             <div class="app-title-bar">
-                <h2>Account Settings</h2>
+                <h2>Settings & Data</h2>
             </div>
             <div style="background: var(--card-bg); border: 1px solid var(--border); padding: 24px; max-width: 500px;">
+                
                 <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Theme Appearance</label>
                 <div class="theme-selector">
                     <button type="button" class="theme-btn" id="theme-btn-light" onclick="setTheme('light')">Light</button>
@@ -523,28 +535,58 @@ APP_TEMPLATE = """
 
                 <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
 
-                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Account Actions</label>
+                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Edit Profile & Account</label>
+                <form method="POST" action="/update_profile" style="margin-top: 12px;">
+                    <label style="display:block; text-align:left; font-size: 0.68rem; font-weight: 700; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">Change Username</label>
+                    <input type="text" name="username" class="app-input" value="{{ username }}" required style="margin-bottom: 12px;">
+
+                    <label style="display:block; text-align:left; font-size: 0.68rem; font-weight: 700; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">New Password (leave blank to keep current)</label>
+                    <input type="password" name="new_password" class="app-input" placeholder="••••••••" style="margin-bottom: 12px;">
+
+                    <label style="display:block; text-align:left; font-size: 0.68rem; font-weight: 700; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">Choose Profile Avatar</label>
+                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px;">
+                        {% set new_avatars = ['⚡', '🪐', '🔮', '🌊', '🎯'] %}
+                        {% for ic in new_avatars %}
+                            <label style="cursor: pointer; font-size: 1.5rem; padding: 10px; background: var(--bg); border: 1px solid var(--border); text-align: center; border-radius: 6px; {% if user_avatar == ic %}border-color: var(--text-primary); background: var(--card-bg);{% endif %}">
+                                <input type="radio" name="avatar" value="{{ ic }}" {% if user_avatar == ic %}checked{% endif %} style="display:none;" onchange="highlightAvatar(this)"> {{ ic }}
+                            </label>
+                        {% endfor %}
+                    </div>
+
+                    <button type="submit" class="btn-secondary-app" style="width: 100%; margin-bottom: 20px;">UPDATE PROFILE</button>
+                </form>
+
+                <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+
+                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Data Management</label>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 8px 0 12px 0;">Download a local backup copy of your entire user movie vault as a CSV table.</p>
+                <a href="/export_csv" class="btn-secondary-app" style="text-decoration: none; display: inline-block; margin-bottom: 20px;">EXPORT CSV BACKUP</a>
+
+                <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+
+                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Account Session</label>
                 <div style="margin-top: 12px;">
-                    <a href="/logout" class="btn-secondary-app" style="color: #dc2626; border-color: #dc2626; text-decoration: none;">LOG OUT OF ACCOUNT</a>
+                    <a href="/logout" class="btn-secondary-app" style="color: #dc2626; border-color: #dc2626; text-decoration: none; display: inline-block;">LOG OUT OF ACCOUNT</a>
                 </div>
             </div>
         </div>
 
     </div>
-
+"""
+APP_TEMPLATE += """
     <!-- Add Movie Modal -->
     <div id="addModal" class="modal-backdrop">
         <div class="modal-content">
             <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 16px;">Add Movie to Vault</h3>
             <form method="POST" action="/add_movie">
-                <input type="text" name="title" class="app-input" placeholder="Movie Title" required style="margin-bottom: 12px;">
-                <input type="text" name="genre" class="app-input" placeholder="Genre (e.g. Sci-Fi)" style="margin-bottom: 12px;">
+                <input type="text" id="add-title-input" name="title" class="app-input" placeholder="Movie Title" required style="margin-bottom: 12px;">
+                <input type="text" id="add-genre-input" name="genre" class="app-input" placeholder="Genre (e.g. Sci-Fi)" style="margin-bottom: 12px;">
                 <select name="status" class="app-select" style="margin-bottom: 12px;">
                     <option value="WATCHED">WATCHED</option>
-                    <option value="PLAN TO WATCH">PLAN TO WATCH</option>
+                    <option value="PLAN TO WATCH" selected>PLAN TO WATCH</option>
                 </select>
-                <input type="number" name="score" class="app-input" placeholder="Score (0 - 10)" min="0" max="10" style="margin-bottom: 12px;">
-                <input type="text" name="poster_url" class="app-input" placeholder="Poster URL (Optional)" style="margin-bottom: 18px;">
+                <input type="number" name="score" class="app-input" placeholder="Score (0 - 10)" min="0" max="10" value="0" style="margin-bottom: 12px;">
+                <input type="text" id="add-poster-input" name="poster_url" class="app-input" placeholder="Poster URL (Optional)" style="margin-bottom: 18px;">
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button type="button" class="btn-secondary-app" onclick="closeAddModal()">CANCEL</button>
                     <button type="submit" class="btn-app">SAVE MOVIE</button>
@@ -553,7 +595,36 @@ APP_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Bottom Navigation Bar -->
+    <!-- Upcoming Movie Details & Built-in Player Modal -->
+    <div id="upcomingModal" class="modal-backdrop">
+        <div class="modal-content" style="max-width: 500px; padding: 20px;">
+            <h3 id="modal-movie-title" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 6px;"></h3>
+            <p id="modal-movie-release" style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 12px;"></p>
+            
+            <!-- Safe In-App Video Container & Fallback -->
+            <div id="modal-trailer-container" style="position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; margin-bottom: 12px; display: none; border-radius: 4px; overflow: hidden;">
+                <iframe id="modal-trailer-iframe" src="" style="width: 100%; height: 100%; border:0; position: absolute; top: 0; left: 0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            </div>
+
+            <div id="modal-fallback-container" style="margin-bottom: 12px; display: none;">
+                <a id="modal-fallback-link" href="#" target="_blank" class="btn-app" style="display: block; width: 100%; text-align: center; text-decoration: none;">▶ WATCH TRAILER ON YOUTUBE</a>
+            </div>
+            
+            <div id="modal-no-trailer" style="padding: 16px; background: var(--bg); text-align: center; color: var(--text-muted); font-size: 0.75rem; margin-bottom: 12px; display: none;">
+                No official trailer preview available for this title.
+            </div>
+
+            <!-- Synopsis / Overview Below the Video -->
+            <p id="modal-movie-overview" style="font-size: 0.8rem; line-height: 1.4; color: var(--text-muted); margin-bottom: 16px; max-height: 120px; overflow-y: auto;"></p>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button type="button" class="btn-secondary-app" onclick="closeUpcomingModal()">CLOSE</button>
+                <button type="button" class="btn-app" id="modal-add-btn" onclick="addUpcomingToList()">+ ADD TO LIST</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5-Item Bottom Navigation Bar -->
     <nav class="bottom-nav-bar">
         <button class="nav-tab active" id="tab-collection" onclick="switchTab('collection')">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
@@ -571,18 +642,15 @@ APP_TEMPLATE = """
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
             <span>Upcoming</span>
         </button>
-        <button class="nav-tab" id="tab-data" onclick="switchTab('data')">
-            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/></svg>
-            <span>Data</span>
-        </button>
         <button class="nav-tab" id="tab-settings" onclick="switchTab('settings')">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             <span>Settings</span>
         </button>
     </nav>
-"""
-APP_TEMPLATE += """
+
     <script>
+        let currentSelectedUpcoming = null;
+
         function switchTab(tabId) {
             const allTabs = document.querySelectorAll('.tab-content');
             allTabs.forEach(tab => tab.classList.remove('active'));
@@ -608,12 +676,67 @@ APP_TEMPLATE += """
             if (activeBtn) activeBtn.classList.add('active');
         }
 
+        function highlightAvatar(radio) {
+            document.querySelectorAll('input[name="avatar"]').forEach(r => {
+                r.parentElement.style.borderColor = 'var(--border)';
+                r.parentElement.style.background = 'var(--bg)';
+            });
+            if (radio.checked) {
+                radio.parentElement.style.borderColor = 'var(--text-primary)';
+                radio.parentElement.style.background = 'var(--card-bg)';
+            }
+        }
+
         function openAddModal() {
             document.getElementById('addModal').style.display = 'flex';
         }
 
         function closeAddModal() {
             document.getElementById('addModal').style.display = 'none';
+        }
+
+        function openUpcomingModal(movie) {
+            currentSelectedUpcoming = movie;
+            document.getElementById('modal-movie-title').textContent = movie.title;
+            document.getElementById('modal-movie-release').textContent = 'Release Date: ' + movie.release;
+            document.getElementById('modal-movie-overview').textContent = movie.overview;
+
+            const iframe = document.getElementById('modal-trailer-iframe');
+            const trailerContainer = document.getElementById('modal-trailer-container');
+            const fallbackContainer = document.getElementById('modal-fallback-container');
+            const fallbackLink = document.getElementById('modal-fallback-link');
+            const noTrailerDiv = document.getElementById('modal-no-trailer');
+
+            if (movie.trailer_key) {
+                iframe.src = 'https://www.youtube-nocookie.com/embed/' + movie.trailer_key + '?playsinline=1&controls=1&modestbranding=1';
+                trailerContainer.style.display = 'block';
+                fallbackLink.href = 'https://www.youtube.com/watch?v=' + movie.trailer_key;
+                fallbackContainer.style.display = 'block';
+                noTrailerDiv.style.display = 'none';
+            } else {
+                iframe.src = '';
+                trailerContainer.style.display = 'none';
+                fallbackContainer.style.display = 'none';
+                noTrailerDiv.style.display = 'block';
+            }
+
+            document.getElementById('upcomingModal').style.display = 'flex';
+        }
+
+        function closeUpcomingModal() {
+            document.getElementById('upcomingModal').style.display = 'none';
+            document.getElementById('modal-trailer-iframe').src = '';
+            currentSelectedUpcoming = null;
+        }
+
+        function addUpcomingToList() {
+            if (!currentSelectedUpcoming) return;
+            document.getElementById('add-title-input').value = currentSelectedUpcoming.title;
+            document.getElementById('add-genre-input').value = 'Upcoming';
+            document.getElementById('add-poster-input').value = currentSelectedUpcoming.poster;
+            
+            closeUpcomingModal();
+            openAddModal();
         }
 
         function executeTmdbSearch() {
@@ -631,7 +754,7 @@ APP_TEMPLATE += """
                         return;
                     }
                     container.innerHTML = data.map(m => `
-                        <div class="app-card">
+                        <div class="app-card" onclick="openAddFromSearch('${encodeURIComponent(m.title)}', '${encodeURIComponent(m.poster)}')">
                             <img src="${m.poster}" alt="${m.title}">
                             <div class="card-overlay">
                                 <div class="card-title">${m.title}</div>
@@ -648,6 +771,13 @@ APP_TEMPLATE += """
                 });
         }
 
+        function openAddFromSearch(title, poster) {
+            document.getElementById('add-title-input').value = decodeURIComponent(title);
+            document.getElementById('add-genre-input').value = 'Cinema';
+            document.getElementById('add-poster-input').value = decodeURIComponent(poster);
+            openAddModal();
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             const savedTheme = localStorage.getItem('user_theme') || 'light';
             setTheme(savedTheme);
@@ -661,24 +791,6 @@ APP_TEMPLATE += """
 </body>
 </html>
 """
-AUTH_CSS = """
-<style>
-    body {
-        display: flex; justify-content: center; align-items: center;
-        min-height: 100vh; background: var(--bg); color: var(--text-primary);
-    }
-    .auth-card {
-        background: var(--card-bg); border: 1px solid var(--border);
-        padding: 36px; width: 100%; max-width: 380px; text-align: center;
-    }
-    .auth-card h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 20px; letter-spacing: 1px; }
-    .auth-card input { margin-bottom: 14px; }
-    .auth-card button { width: 100%; padding: 12px; margin-top: 6px; }
-    .auth-link { display: block; margin-top: 18px; font-size: 0.75rem; color: var(--text-muted); text-decoration: none; }
-    .error-banner { background: rgba(220, 38, 38, 0.1); color: #dc2626; border: 1px solid #dc2626; padding: 10px; font-size: 0.75rem; margin-bottom: 16px; }
-</style>
-"""
-
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -720,12 +832,33 @@ REGISTER_TEMPLATE = """
         <form method="POST" action="/register">
             <input type="text" name="username" class="app-input" placeholder="USERNAME" required>
             <input type="password" name="password" class="app-input" placeholder="PASSWORD" required>
+            
+            <label style="display:block; text-align:left; font-size: 0.70rem; font-weight: 700; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Choose Profile Avatar</label>
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px;">
+                {% set new_avatars = ['⚡', '🪐', '🔮', '🌊', '🎯'] %}
+                {% for ic in new_avatars %}
+                    <label style="cursor: pointer; font-size: 1.5rem; padding: 10px; background: var(--bg); border: 1px solid var(--border); text-align: center; border-radius: 6px; {% if loop.first %}border-color: var(--text-primary); background: var(--card-bg);{% endif %}">
+                        <input type="radio" name="avatar" value="{{ ic }}" {% if loop.first %}checked{% endif %} style="display:none;" onchange="highlightAvatar(this)"> {{ ic }}
+                    </label>
+                {% endfor %}
+            </div>
+
             <button type="submit" class="btn-app">REGISTER</button>
         </form>
         <a href="/login" class="auth-link">Already registered? Log in here</a>
     </div>
     <script>
         document.documentElement.setAttribute('data-theme', localStorage.getItem('user_theme') || 'light');
+        function highlightAvatar(radio) {
+            document.querySelectorAll('input[name="avatar"]').forEach(r => {
+                r.parentElement.style.borderColor = 'var(--border)';
+                r.parentElement.style.background = 'var(--bg)';
+            });
+            if (radio.checked) {
+                radio.parentElement.style.borderColor = 'var(--text-primary)';
+                radio.parentElement.style.background = 'var(--card-bg)';
+            }
+        }
     </script>
 </body>
 </html>
@@ -750,6 +883,7 @@ def login():
         if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
+            session['avatar'] = user['avatar'] if 'avatar' in user.keys() else '⚡'
             return redirect(url_for('dashboard'))
         
         return render_template_string(LOGIN_TEMPLATE, error="Invalid username or password.")
@@ -760,6 +894,7 @@ def register():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        avatar = request.form.get('avatar', '⚡')
 
         if not username or not password:
             return render_template_string(REGISTER_TEMPLATE, error="All fields are required.")
@@ -767,7 +902,7 @@ def register():
         hashed_password = generate_password_hash(password)
         conn = get_db_connection()
         try:
-            conn.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+            conn.execute("INSERT INTO users (username, password, avatar) VALUES (?, ?, ?)", (username, hashed_password, avatar))
             conn.commit()
             conn.close()
             return redirect(url_for('login'))
@@ -781,6 +916,7 @@ def register():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
 @app.route('/dashboard')
 def dashboard():
     if 'user_id' not in session:
@@ -793,7 +929,10 @@ def dashboard():
 
     conn = get_db_connection()
 
-    # Query setup
+    user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user_avatar = user_row['avatar'] if user_row and 'avatar' in user_row.keys() else '⚡'
+    username = user_row['username'] if user_row else session.get('username', '')
+
     query = "SELECT * FROM movies WHERE user_id = ?"
     params = [user_id]
 
@@ -812,7 +951,6 @@ def dashboard():
 
     user_movies = conn.execute(query, params).fetchall()
 
-    # Get unique genres
     genres_query = conn.execute("SELECT DISTINCT genre FROM movies WHERE user_id = ? AND genre != ''", (user_id,)).fetchall()
     genres = [row['genre'] for row in genres_query]
 
@@ -829,8 +967,41 @@ def dashboard():
         current_genre=genre_filter,
         current_sort=sort_filter,
         news_feed=news_feed,
-        upcoming_movies=upcoming_movies
+        upcoming_movies=upcoming_movies,
+        user_avatar=user_avatar,
+        username=username
     )
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    user_id = session['user_id']
+    new_username = request.form.get('username', '').strip()
+    new_password = request.form.get('new_password', '')
+    new_avatar = request.form.get('avatar', '⚡')
+
+    if not new_username:
+        return redirect(url_for('dashboard') + '?tab=settings')
+
+    conn = get_db_connection()
+    try:
+        if new_password:
+            hashed_pw = generate_password_hash(new_password)
+            conn.execute("UPDATE users SET username = ?, password = ?, avatar = ? WHERE id = ?", (new_username, hashed_pw, new_avatar, user_id))
+        else:
+            conn.execute("UPDATE users SET username = ?, avatar = ? WHERE id = ?", (new_username, new_avatar, user_id))
+        
+        conn.commit()
+        session['username'] = new_username
+        session['avatar'] = new_avatar
+    except sqlite3.IntegrityError:
+        pass
+    finally:
+        conn.close()
+
+    return redirect(url_for('dashboard') + '?tab=settings')
 
 @app.route('/add_movie', methods=['POST'])
 def add_movie():
@@ -853,7 +1024,7 @@ def add_movie():
         conn.commit()
         conn.close()
 
-    return redirect(url_for('dashboard', tab='collection'))
+    return redirect(url_for('dashboard') + '?tab=collection')
 
 @app.route('/api/search')
 def api_search():
