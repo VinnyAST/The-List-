@@ -3,9 +3,11 @@ import sqlite3
 import urllib.request
 import json
 import urllib.parse
+import csv
+import io
 import xml.etree.ElementTree as ET
-from flask import Flask, redirect, render_template_string, request, session, url_for
-from werkzeug.security import check_password_hash, generate_password_hash
+from flask import Flask, redirect, render_template_string, request, session, url_for, Response
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "the_list_secret_key_98765_change_me"
@@ -95,76 +97,110 @@ def fetch_movie_news():
         print(f"Error fetching news feed: {e}")
         return []
 
-# Fetcher with Fallback Support
-def fetch_itunes_movies(term):
+TMDB_API_KEY = "712a9f047a4b914389fae85321120ec1"
+
+def fetch_tmdb_movies(query):
     try:
-        url = f"https://itunes.apple.com/search?term={urllib.parse.quote(term)}&entity=movie&country=US&limit=12"
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={encoded_query}&include_adult=false&language=en-US&page=1"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
-
+        
         results = []
         for movie in data.get('results', []):
-            artwork = movie.get('artworkUrl100', '')
-            poster_url = artwork.replace('100x100bb', '600x600bb') if artwork else "https://via.placeholder.com/300x450?text=No+Poster"
+            poster_path = movie.get('poster_path')
+            poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450?text=No+Poster"
+            
             results.append({
-                "title": movie.get('trackName', 'Untitled'),
-                "release": movie.get('releaseDate', '2026')[:10],
-                "genre": movie.get('primaryGenreName', 'Cinema'),
-                "score": round(float(movie.get('trackExplicitness', 5)) / 2, 1) if 'trackExplicitness' in movie else 8.5,
+                "id": movie.get('id'),
+                "title": movie.get('title', 'Untitled'),
+                "release": movie.get('release_date', 'N/A')[:4],
+                "genre": "Cinema",
+                "score": round(float(movie.get('vote_average', 0)), 1),
                 "poster": poster_url,
-                "overview": movie.get('longDescription', '')
+                "overview": movie.get('overview', '')
             })
-
-        if not results:
-            term_lower = term.lower()
-            fallbacks = {
-                "avengers": [
-                    {"title": "The Avengers", "release": "2012-05-04", "genre": "Action", "score": 8.0, "poster": "https://upload.wikimedia.org/wikipedia/en/8/8a/The_Avengers_%282012_film%29_poster.jpg", "overview": "Earth's mightiest heroes assemble."},
-                    {"title": "Avengers: Endgame", "release": "2019-04-26", "genre": "Action", "score": 8.4, "poster": "https://upload.wikimedia.org/wikipedia/en/0/0d/Avengers_Endgame_poster.jpg", "overview": "After Thanos' snap..."}
-                ],
-                "spider-man": [
-                    {"title": "Spider-Man: Across the Spider-Verse", "release": "2023-06-02", "genre": "Animation", "score": 9.0, "poster": "https://upload.wikimedia.org/wikipedia/en/b/b4/Spider-Man-_Across_the_Spider-Verse_poster.jpg", "overview": "Multiverse adventure."}
-                ]
-            }
-            for key, movies_list in fallbacks.items():
-                if key in term_lower:
-                    return movies_list
         return results
     except Exception as e:
-        print(f"Error fetching iTunes movies: {e}")
+        print(f"Error querying TMDb API: {e}")
         return []
 
 def fetch_upcoming_movies():
-    items = fetch_itunes_movies("blockbuster 2026")
-    if not items:
-        items = [
-            {"title": "Dune: Part Two", "release": "2026-03-01", "poster": "https://upload.wikimedia.org/wikipedia/en/5/52/Dune_Part_Two_poster.jpeg"},
-            {"title": "Oppenheimer", "release": "2026-07-21", "poster": "https://upload.wikimedia.org/wikipedia/en/4/4a/Oppenheimer_%28film%29.jpg"}
-        ]
-    return items
+    try:
+        url = f"https://api.themoviedb.org/3/movie/upcoming?api_key={TMDB_API_KEY}&language=en-US&page=1"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+        items = []
+        for movie in data.get('results', [])[:12]:
+            poster_path = movie.get('poster_path')
+            items.append({
+                "id": movie.get('id'),
+                "title": movie.get('title', 'Untitled'),
+                "release": movie.get('release_date', 'Coming Soon'),
+                "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450"
+            })
+        return items
+    except Exception:
+        return []
 
 def fetch_recommended_movies():
-    items = fetch_itunes_movies("award winning movie")
-    if not items:
-        items = [
-            {"title": "Spider-Man: Across the Spider-Verse", "genre": "Animation", "score": 9.0, "poster": "https://upload.wikimedia.org/wikipedia/en/b/b4/Spider-Man-_Across_the_Spider-Verse_poster.jpg"}
-        ]
-    return items
+    try:
+        url = f"https://api.themoviedb.org/3/movie/top_rated?api_key={TMDB_API_KEY}&language=en-US&page=1"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+        items = []
+        for movie in data.get('results', [])[:12]:
+            poster_path = movie.get('poster_path')
+            items.append({
+                "id": movie.get('id'),
+                "title": movie.get('title', 'Untitled'),
+                "genre": "Top Rated",
+                "score": round(float(movie.get('vote_average', 0)), 1),
+                "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/300x450"
+            })
+        return items
+    except Exception:
+        return []
 
 LOGO_SVG = """<svg width="26" height="16" viewBox="0 0 120 60" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;"><circle cx="25" cy="30" r="18" stroke="currentColor" stroke-width="10"/><circle cx="60" cy="30" r="22" stroke="currentColor" stroke-width="11"/><circle cx="95" cy="30" r="18" stroke="currentColor" stroke-width="10"/></svg>"""
-
 BASE_CSS = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&display=swap');
 
-    :root {
+    :root[data-theme="light"] {
         --bg: #f1f1f1;
         --card-bg: #ffffff;
         --border: #e2e2e2;
         --text-primary: #111111;
         --text-muted: #777777;
         --accent: #181818;
+        --input-bg: #ffffff;
+    }
+
+    :root[data-theme="dim"] {
+        --bg: #1e2530;
+        --card-bg: #283141;
+        --border: #3a4659;
+        --text-primary: #e6edf3;
+        --text-muted: #9ba7b6;
+        --accent: #3b82f6;
+        --input-bg: #1e2530;
+    }
+
+    :root[data-theme="dark"] {
+        --bg: #0a0a0a;
+        --card-bg: #141414;
+        --border: #262626;
+        --text-primary: #f5f5f5;
+        --text-muted: #888888;
+        --accent: #ffffff;
+        --input-bg: #0a0a0a;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -175,14 +211,15 @@ BASE_CSS = """
         color: var(--text-primary);
         min-height: 100vh;
         margin: 0;
-        padding-bottom: 60px;
+        padding-bottom: 80px;
+        transition: background-color 0.3s, color 0.3s;
     }
 
     .container { max-width: 950px; margin: 0 auto; padding: 0 20px; }
 
     .app-header {
         background: var(--bg);
-        padding: 24px 8%;
+        padding: 20px 8%;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -202,917 +239,656 @@ BASE_CSS = """
         text-transform: uppercase;
     }
 
-    .app-user-actions { display: flex; align-items: center; gap: 18px; }
+    .tab-content { display: none !important; }
+    .tab-content.active { display: block !important; }
 
-    .nav-tabs {
+    .bottom-nav-bar {
+        position: fixed;
+        bottom: 0; left: 0; width: 100%;
+        height: 60px;
+        background-color: var(--bg);
+        border-top: 1px solid var(--border);
         display: flex;
-        gap: 20px;
-        margin-top: 24px;
-        margin-bottom: 24px;
-        border-bottom: 1px solid var(--border);
-        padding-bottom: 12px;
-        overflow-x: auto;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 1000;
     }
 
     .nav-tab {
         background: transparent;
         color: var(--text-muted);
         border: none;
-        font-size: 0.75rem;
+        font-size: 0.60rem;
         font-weight: 600;
-        letter-spacing: 1.5px;
+        letter-spacing: 0.5px;
         text-transform: uppercase;
         cursor: pointer;
-        padding-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1; height: 100%;
         position: relative;
-        white-space: nowrap;
         transition: color 0.2s ease;
     }
 
+    .nav-tab svg {
+        width: 18px; height: 18px;
+        margin-bottom: 3px;
+        fill: none;
+        stroke: var(--text-muted);
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: stroke 0.2s ease;
+    }
+
     .nav-tab.active { color: var(--text-primary); }
+    .nav-tab.active svg { stroke: var(--text-primary); }
 
     .nav-tab.active::after {
-        content: '';
-        position: absolute;
-        bottom: -13px; left: 0; right: 0;
-        height: 2px;
-        background-color: var(--text-primary);
+        content: ''; position: absolute;
+        bottom: 0; left: 15%; right: 15%;
+        height: 2px; background-color: var(--text-primary);
     }
 
     .app-title-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 0 16px 0;
+        display: flex; justify-content: space-between;
+        align-items: center; padding: 20px 0 16px 0;
     }
 
-    .app-title-bar h2 {
-        font-size: 1.8rem;
-        font-weight: 200;
-        letter-spacing: -1px;
+    .app-title-bar h2 { font-size: 1.8rem; font-weight: 200; letter-spacing: -1px; }
+
+    .filter-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px; margin-bottom: 20px;
     }
 
-    .view-icons { display: flex; gap: 12px; font-size: 1.1rem; cursor: pointer; }
-    .view-icon { color: #aaaaaa; transition: color 0.2s; }
-    .view-icon.active { color: var(--text-primary); }
-
-    .app-select-container { margin-bottom: 20px; }
-    .app-select {
-        width: 100%;
-        padding: 14px 16px;
+    .app-select, .app-input {
+        width: 100%; padding: 12px 14px;
         background: var(--card-bg);
         color: var(--text-primary);
         border: 1px solid var(--border);
-        font-size: 0.82rem;
-        font-weight: 600;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        outline: none; cursor: pointer; appearance: none;
-        background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23111111'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
-        background-repeat: no-repeat;
-        background-position: right 16px center;
-        background-size: 18px;
+        font-size: 0.78rem; font-weight: 600;
+        letter-spacing: 1px; text-transform: uppercase;
+        outline: none;
     }
 
     .app-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
     @media (min-width: 600px) { .app-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; } }
 
     .app-card {
-        position: relative;
-        aspect-ratio: 2 / 3;
-        background: var(--card-bg);
-        border: 1px solid var(--border);
+        position: relative; aspect-ratio: 2 / 3;
+        background: var(--card-bg); border: 1px solid var(--border);
         overflow: hidden;
-        transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }
-
-    .app-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 12px 24px rgba(0,0,0,0.08);
     }
 
     .app-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-    .edit-badge {
-        position: absolute;
-        top: 8px; left: 8px;
-        background: rgba(255, 255, 255, 0.92);
-        border: 1px solid var(--border);
-        color: var(--text-primary);
-        width: 28px; height: 28px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 0.75rem; cursor: pointer; z-index: 5;
-    }
-
     .card-overlay {
-        position: absolute;
-        bottom: 0; left: 0; right: 0;
-        background: linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 75%, rgba(0, 0, 0, 0) 100%);
-        padding: 24px 10px 10px 10px;
-        color: #ffffff;
+        position: absolute; bottom: 0; left: 0; right: 0;
+        background: linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.4) 75%, rgba(0, 0, 0, 0) 100%);
+        padding: 24px 10px 10px 10px; color: #ffffff;
         display: flex; flex-direction: column; gap: 3px;
-        pointer-events: none;
     }
 
     .card-title { font-size: 0.82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .card-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: #dddddd; }
-    .score-star { color: #f59e0b; font-weight: 700; }
-
-    .news-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    @media (min-width: 650px) { .news-grid { grid-template-columns: repeat(3, 1fr); gap: 20px; } }
-
-    .news-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        transition: transform 0.2s;
-    }
-
-    .news-card:hover { transform: translateY(-3px); }
-
-    .news-source {
-        font-size: 0.68rem;
-        font-weight: 700;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        margin-bottom: 8px;
-    }
-
-    .news-title {
-        font-size: 0.95rem;
-        font-weight: 500;
-        line-height: 1.35;
-        margin-bottom: 16px;
-        color: var(--text-primary);
-    }
-
-    .news-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-top: 1px solid var(--border);
-        padding-top: 12px;
-        font-size: 0.72rem;
-    }
-
-    .news-link {
-        color: var(--text-primary);
-        text-decoration: none;
-        font-weight: 700;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-    }
-
-    .app-list-table {
-        width: 100%;
-        border-collapse: collapse;
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-    }
-    .app-list-table th {
-        background: #fdfdfd;
-        text-align: left;
-        padding: 14px;
-        font-size: 0.72rem;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        border-bottom: 1px solid var(--border);
-    }
-    .app-list-table td {
-        padding: 14px;
-        border-bottom: 1px solid var(--border);
-        font-size: 0.85rem;
-    }
 
     .btn-app {
-        background: var(--accent);
-        color: #ffffff;
-        border: none;
-        padding: 10px 18px;
-        font-weight: 700;
-        font-size: 0.75rem;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        cursor: pointer;
-        text-decoration: none;
-        display: inline-block;
-        transition: opacity 0.2s;
-    }
-    .btn-app:hover { opacity: 0.85; }
-
-    .modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(4px);
-        z-index: 1000;
-        align-items: center; justify-content: center;
-        padding: 16px;
+        background: var(--accent); color: var(--bg);
+        border: none; padding: 10px 18px; font-weight: 700;
+        font-size: 0.75rem; letter-spacing: 1.5px;
+        text-transform: uppercase; cursor: pointer;
+        text-decoration: none; display: inline-block;
     }
 
-    .modal-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        padding: 28px;
-        width: 100%; max-width: 460px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    .btn-secondary-app {
+        background: transparent; color: var(--text-primary);
+        border: 1px solid var(--border); padding: 9px 14px;
+        font-weight: 600; font-size: 0.72rem;
+        letter-spacing: 1px; text-transform: uppercase; cursor: pointer;
     }
 
-    input, select, textarea {
-        width: 100%;
-        padding: 12px;
-        margin-top: 6px;
-        margin-bottom: 14px;
-        border: 1px solid var(--border);
-        background: #fdfdfd;
+    .theme-selector {
+        display: grid; grid-template-columns: repeat(3, 1fr);
+        gap: 12px; margin-top: 10px; margin-bottom: 24px;
+    }
+
+    .theme-btn {
+        padding: 14px; border: 1px solid var(--border);
+        background: var(--card-bg); color: var(--text-primary);
+        font-weight: 600; font-size: 0.75rem;
+        letter-spacing: 1px; text-transform: uppercase;
+        cursor: pointer; text-align: center;
+    }
+
+    .theme-btn.active { border-color: var(--text-primary); outline: 2px solid var(--text-primary); }
+
+    .modal-backdrop {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.7); display: none;
+        justify-content: center; align-items: center; z-index: 2000;
+    }
+    .modal-content {
+        background: var(--card-bg); border: 1px solid var(--border);
+        padding: 24px; width: 90%; max-width: 450px;
         color: var(--text-primary);
-        font-family: inherit;
-        font-size: 0.88rem;
-        outline: none;
     }
-
-    input:focus, select:focus, textarea:focus { border-color: var(--text-primary); }
 </style>
 """
-
-LANDING_TEMPLATE = """
+APP_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The List — Track the action, track the list.</title>
+    <title>Dashboard — The List</title>
     """ + BASE_CSS + """
-    <style>
-        body { display: flex; flex-direction: column; justify-content: space-between; overflow-x: hidden; padding-bottom: 0; }
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 28px 8%; }
-        .nav-right { display: flex; align-items: center; gap: 24px; }
-        .nav-link { text-decoration: none; color: #111111; font-size: 0.78rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; }
-        .hero-section { padding: 10px 8% 0 8%; max-width: 1100px; width: 100%; margin: 0 auto; }
-        .headline { font-size: clamp(3.2rem, 7.5vw, 5.8rem); font-weight: 200; line-height: 1.05; letter-spacing: -2px; color: #111111; margin-bottom: 28px; }
-        .sub-category { font-size: 0.72rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #222222; margin-bottom: 8px; }
-        .sub-text { font-size: 0.95rem; color: #888888; font-weight: 300; margin-bottom: 38px; }
-        .cta-group { display: flex; align-items: center; gap: 32px; margin-bottom: 50px; }
-        .btn-primary { background-color: #181818; color: #ffffff; text-decoration: none; padding: 18px 36px; font-size: 0.78rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; display: inline-block; }
-        .btn-secondary { color: #111111; text-decoration: none; font-size: 0.78rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; border-bottom: 1.5px solid #111111; padding-bottom: 4px; }
-        .mockup-container { display: flex; justify-content: center; align-items: flex-end; gap: 16px; width: 100%; max-width: 950px; margin: 0 auto; padding: 0 20px; }
-        .device { background: #111216; border-radius: 8px 8px 0 0; box-shadow: 0 20px 40px rgba(0,0,0,0.12); border: 3px solid #ffffff; border-bottom: none; overflow: hidden; }
-        .device-phone { width: 120px; height: 180px; display: none; }
-        .device-tablet { width: 210px; height: 210px; }
-        .device-laptop { width: 380px; height: 240px; }
-        @media (min-width: 650px) { .device-phone { display: block; } }
-        .mockup-img { width: 100%; height: 100%; object-fit: cover; }
-    </style>
 </head>
 <body>
-    <header class="header">
+
+    <header class="app-header">
         <a href="/" class="brand-logo">
             """ + LOGO_SVG + """ <span>THE LIST</span>
         </a>
-        <div class="nav-right">
-            <a href="/login" class="nav-link">LOG IN</a>
-        </div>
     </header>
-
-    <main class="hero-section">
-        <h1 class="headline">Track the action.<br>Track the list.</h1>
-        <p class="sub-category">MOVIES • REVIEWS • LIVE NEWS + UPCOMING.</p>
-        <p class="sub-text">Start organizing your cinema collection today.</p>
-
-        <div class="cta-group">
-            <a href="/register" class="btn-primary">GET STARTED</a>
-            <a href="/login" class="btn-secondary">LEARN MORE</a>
-        </div>
-    </main>
-
-    <div class="mockup-container">
-        <div class="device device-phone"><img class="mockup-img" src="https://upload.wikimedia.org/wikipedia/en/5/52/Dune_Part_Two_poster.jpeg" alt="Dune"></div>
-        <div class="device device-tablet"><img class="mockup-img" src="https://upload.wikimedia.org/wikipedia/en/4/4a/Oppenheimer_%28film%29.jpg" alt="Oppenheimer"></div>
-        <div class="device device-laptop"><img class="mockup-img" src="https://upload.wikimedia.org/wikipedia/en/b/b4/Spider-Man-_Across_the_Spider-Verse_poster.jpg" alt="Spider-Man"></div>
-    </div>
-</body>
-</html>
-"""
-
-AUTH_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }} — The List</title>
-    """ + BASE_CSS + """
-</head>
-<body style="display: flex; align-items: center; justify-content: center; min-height: 100vh;">
-    <div class="modal-card" style="max-width: 380px;">
-        <div style="text-align: center; margin-bottom: 24px;">
-            <a href="/" class="brand-logo" style="justify-content: center; font-size: 1.1rem; margin-bottom: 8px;">
-                """ + LOGO_SVG + """ <span>THE LIST</span>
-            </a>
-            <p style="color: var(--text-muted); font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;">Sign in to your cinema vault</p>
-        </div>
-
-        {% if error %}<div style="color:#dc2626; font-size: 0.82rem; text-align: center; margin-bottom: 12px; font-weight: 500;">{{ error }}</div>{% endif %}
-
-        <form method="POST">
-            <input type="text" name="username" placeholder="Username" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit" class="btn-app" style="width: 100%; padding: 14px; margin-top: 6px;">{{ title }}</button>
-        </form>
-
-        {% if title == 'Login' %}
-            <p style="text-align: center; font-size: 0.8rem; margin-top: 20px; color: var(--text-muted);">Need an account? <a href="/register" style="color: var(--text-primary); font-weight: 600;">Register here</a></p>
-        {% else %}
-            <p style="text-align: center; font-size: 0.8rem; margin-top: 20px; color: var(--text-muted);">Have an account? <a href="/login" style="color: var(--text-primary); font-weight: 600;">Login here</a></p>
-        {% endif %}
-    </div>
-</body>
-</html>
-"""
-AUTH_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }} — The List</title>
-    """ + BASE_CSS + """
-</head>
-<body style="display: flex; align-items: center; justify-content: center; min-height: 100vh;">
-    <div class="modal-card" style="max-width: 380px;">
-        <div style="text-align: center; margin-bottom: 24px;">
-            <a href="/" class="brand-logo" style="justify-content: center; font-size: 1.1rem; margin-bottom: 8px;">
-                """ + LOGO_SVG + """ <span>THE LIST</span>
-            </a>
-            <p style="color: var(--text-muted); font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;">Sign in to your cinema vault</p>
-        </div>
-
-        {% if error %}<div style="color:#dc2626; font-size: 0.82rem; text-align: center; margin-bottom: 12px; font-weight: 500;">{{ error }}</div>{% endif %}
-
-        <form method="POST">
-            <input type="text" name="username" placeholder="Username" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit" class="btn-app" style="width: 100%; padding: 14px; margin-top: 6px;">{{ title }}</button>
-        </form>
-
-        {% if title == 'Login' %}
-            <p style="text-align: center; font-size: 0.8rem; margin-top: 20px; color: var(--text-muted);">Need an account? <a href="/register" style="color: var(--text-primary); font-weight: 600;">Register here</a></p>
-        {% else %}
-            <p style="text-align: center; font-size: 0.8rem; margin-top: 20px; color: var(--text-muted);">Have an account? <a href="/login" style="color: var(--text-primary); font-weight: 600;">Login here</a></p>
-        {% endif %}
-    </div>
-</body>
-</html>
-"""
-
-MAIN_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The List</title>
-    """ + BASE_CSS + """
-</head>
-<body>
-
-    <div class="app-header">
-        <a href="/" class="brand-logo">
-            """ + LOGO_SVG + """ <span>THE LIST</span>
-        </a>
-        <div class="app-user-actions">
-            <button onclick="openModal()" class="btn-app">+ Add Title</button>
-            <span style="font-weight: 600; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">{{ username }}</span>
-            <a href="/logout" style="color: var(--text-primary); font-size: 0.75rem; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; text-decoration: none;">Exit</a>
-        </div>
-    </div>
 
     <div class="container">
 
-        <div class="nav-tabs">
-            <button id="tab-library" onclick="switchNavTab('library')" class="nav-tab active">My List</button>
-            <button id="tab-search" onclick="switchNavTab('search')" class="nav-tab">Search & Track</button>
-            <button id="tab-news" onclick="switchNavTab('news')" class="nav-tab">Cinema News</button>
-            <button id="tab-upcoming" onclick="switchNavTab('upcoming')" class="nav-tab">Upcoming Releases</button>
-            <button id="tab-recommended" onclick="switchNavTab('recommended')" class="nav-tab">Top Rated</button>
-        </div>
-
-        <!-- Section: My List -->
-        <div id="section-library">
+        <!-- TAB 1: COLLECTION (VAULT) -->
+        <div id="collection-view" class="tab-content active">
             <div class="app-title-bar">
-                <h2>My List</h2>
-                <div class="view-icons">
-                    <span id="btn-grid-view" onclick="setView('grid')" class="view-icon active" title="Grid View">⊞</span>
-                    <span id="btn-list-view" onclick="setView('list')" class="view-icon" title="List View">≡</span>
-                </div>
+                <h2>My Collection</h2>
+                <button class="btn-app" onclick="openAddModal()">+ ADD</button>
             </div>
 
-            <div class="app-select-container">
-                <select onchange="location = this.value;" class="app-select">
-                    <option value="/?filter=All" {% if current_filter == 'All' %}selected{% endif %}>All Movies</option>
-                    <option value="/?filter=Watching" {% if current_filter == 'Watching' %}selected{% endif %}>Watching</option>
-                    <option value="/?filter=Completed" {% if current_filter == 'Completed' %}selected{% endif %}>Completed</option>
-                    <option value="/?filter=On Hold" {% if current_filter == 'On Hold' %}selected{% endif %}>On Hold</option>
-                    <option value="/?filter=Dropped" {% if current_filter == 'Dropped' %}selected{% endif %}>Dropped</option>
-                    <option value="/?filter=Plan to Watch" {% if current_filter == 'Plan to Watch' %}selected{% endif %}>Plan to Watch</option>
+            <form method="GET" action="/dashboard" class="filter-bar">
+                <select name="status" class="app-select" onchange="this.form.submit()">
+                    <option value="ALL" {% if current_status == 'ALL' %}selected{% endif %}>STATUS: ALL</option>
+                    <option value="WATCHED" {% if current_status == 'WATCHED' %}selected{% endif %}>WATCHED</option>
+                    <option value="PLAN TO WATCH" {% if current_status == 'PLAN TO WATCH' %}selected{% endif %}>PLAN TO WATCH</option>
                 </select>
-            </div>
 
-            <div id="view-grid" class="app-grid">
-                {% for m in movies %}
-                <div class="app-card">
-                    <div class="edit-badge" title="Edit / Add Comment" onclick='editMovie({{ m.id }}, {{ m.title|tojson }}, {{ m.genre|tojson }}, {{ m.status|tojson }}, {{ m.score }}, {{ m.poster_url|tojson }}, {{ m.comments|tojson }})'>✏️</div>
+                <select name="genre" class="app-select" onchange="this.form.submit()">
+                    <option value="ALL" {% if current_genre == 'ALL' %}selected{% endif %}>GENRE: ALL</option>
+                    {% for g in genres %}
+                        <option value="{{ g }}" {% if current_genre == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
 
-                    {% if m.poster_url %}
-                        <img src="{{ m.poster_url }}" alt="{{ m.title }}" referrerpolicy="no-referrer" onerror="this.src='https://via.placeholder.com/300x450/eeeeee/111111?text={{ m.title }}'">
-                    {% else %}
-                        <div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:2rem;color:#888;">🎬</div>
-                    {% endif %}
+                <select name="sort" class="app-select" onchange="this.form.submit()">
+                    <option value="TITLE" {% if current_sort == 'TITLE' %}selected{% endif %}>SORT: TITLE</option>
+                    <option value="SCORE" {% if current_sort == 'SCORE' %}selected{% endif %}>SORT: HIGHEST SCORE</option>
+                </select>
+            </form>
 
-                    <div class="card-overlay">
-                        <div class="card-title">{{ m.title }}</div>
-                        <div class="card-meta">
-                            <span>{{ m.status }}</span>
-                            <span class="score-star">⭐ {% if m.score > 0 %}{{ m.score }}{% else %}-{% endif %}</span>
+            {% if user_movies %}
+                <div class="app-grid">
+                    {% for movie in user_movies %}
+                        <div class="app-card">
+                            <img src="{{ movie.poster_url if movie.poster_url else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.title }}">
+                            <div class="card-overlay">
+                                <div class="card-title">{{ movie.title }}</div>
+                                <div class="card-meta">
+                                    <span>{{ movie.genre if movie.genre else 'Cinema' }}</span>
+                                    <span>★ {{ movie.score }}</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    {% endfor %}
                 </div>
-                {% else %}
-                <div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 60px 0; font-weight: 300;">
-                    No movies found in this section. Tap <b>+ Add Title</b> above to populate your list!
+            {% else %}
+                <div style="text-align: center; padding: 60px 20px; background: var(--card-bg); border: 1px solid var(--border);">
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px;">Your movie vault is empty.</p>
+                    <button class="btn-app" onclick="openAddModal()">Add Your First Movie</button>
                 </div>
-                {% endfor %}
-            </div>
-
-            <div id="view-list" style="display: none;">
-                <table class="app-list-table">
-                    <thead>
-                        <tr>
-                            <th>Title</th>
-                            <th>Status</th>
-                            <th>Score</th>
-                            <th>Comment / Notes</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for m in movies %}
-                        <tr>
-                            <td style="font-weight: 600; color: var(--text-primary);">{{ m.title }}</td>
-                            <td>{{ m.status }}</td>
-                            <td><span class="score-star">⭐ {% if m.score > 0 %}{{ m.score }}{% else %}-{% endif %}</span></td>
-                            <td style="color: var(--text-muted); font-size: 0.8rem;">{{ m.comments or "—" }}</td>
-                            <td>
-                                <a href="/delete/{{ m.id }}" onclick="return confirm('Delete title?')" style="color:#dc2626; text-decoration:none; font-weight:600; font-size:0.75rem; letter-spacing:1px; text-transform:uppercase;">Remove</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            {% endif %}
         </div>
 
-        <!-- Section: Live Search & Tracking -->
-        <div id="section-search" style="display: none;">
+        <!-- TAB 2: SEARCH -->
+        <div id="search-view" class="tab-content">
             <div class="app-title-bar">
-                <h2>Search & Track</h2>
-                <span style="font-size: 0.72rem; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted);">LIVE ITUNES DB</span>
+                <h2>Search TMDB</h2>
             </div>
-
             <div style="display: flex; gap: 10px; margin-bottom: 24px;">
-                <input type="text" id="liveSearchInput" placeholder="Type a movie title (e.g., Avengers, Spider-Man)..." style="margin:0; padding: 14px;" onkeypress="if(event.key === 'Enter') performLiveSearch()">
-                <button type="button" onclick="performLiveSearch()" class="btn-app" style="padding: 0 24px;">Search</button>
+                <input type="text" id="tmdb-search-input" class="app-input" placeholder="Search movies online...">
+                <button class="btn-app" onclick="executeTmdbSearch()">SEARCH</button>
             </div>
-
-            <div id="liveSearchResults" class="app-grid">
-                <div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 40px 0; font-weight: 300;">
-                    Enter a title above to discover movies, pull info, posters, and track them instantly.
-                </div>
-            </div>
+            <div id="tmdb-search-results" class="app-grid"></div>
         </div>
 
-        <!-- Section: Cinema News Feed -->
-        <div id="section-news" style="display: none;">
+        <!-- TAB 3: NEWS -->
+        <div id="news-view" class="tab-content">
             <div class="app-title-bar">
                 <h2>Cinema News</h2>
-                <span style="font-size: 0.72rem; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted);">LIVE RSS FEED</span>
             </div>
-
             <div class="news-grid">
-                {% for article in news_items %}
-                <div class="news-card">
-                    <div>
-                        <div class="news-source">Source: {{ article.source }}</div>
-                        <h3 class="news-title">{{ article.title }}</h3>
+                {% for item in news_feed %}
+                    <div class="news-card" style="background: var(--card-bg); border: 1px solid var(--border); padding: 16px; margin-bottom: 12px;">
+                        <div class="news-source" style="font-size: 0.7rem; color: var(--text-muted);">{{ item.source }}</div>
+                        <div class="news-title" style="font-weight: 600; margin: 8px 0;">{{ item.title }}</div>
+                        <a href="{{ item.link }}" target="_blank" class="btn-secondary-app" style="text-decoration: none; display: inline-block;">READ ARTICLE →</a>
                     </div>
-                    <div class="news-footer">
-                        <span style="color: var(--text-muted);">{{ article.date }}</span>
-                        <a href="{{ article.link }}" target="_blank" class="news-link">Read Article ↗</a>
-                    </div>
-                </div>
                 {% endfor %}
             </div>
         </div>
 
-        <!-- Section: Live Upcoming Movies -->
-        <div id="section-upcoming" style="display: none;">
+        <!-- TAB 4: UPCOMING -->
+        <div id="upcoming-view" class="tab-content">
             <div class="app-title-bar">
                 <h2>Upcoming Releases</h2>
-                <span style="font-size: 0.72rem; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted);">ITUNES CALENDAR</span>
             </div>
             <div class="app-grid">
-                {% for up in upcoming %}
-                <div class="app-card">
-                    <img src="{{ up.poster }}" alt="{{ up.title }}" referrerpolicy="no-referrer">
-                    <div class="card-overlay">
-                        <div class="card-title">{{ up.title }}</div>
-                        <div class="card-meta">
-                            <span>📅 {{ up.release }}</span>
+                {% for movie in upcoming_movies %}
+                    <div class="app-card">
+                        <img src="{{ movie.poster }}" alt="{{ movie.title }}">
+                        <div class="card-overlay">
+                            <div class="card-title">{{ movie.title }}</div>
+                            <div class="card-meta">
+                                <span>Release</span>
+                                <span>{{ movie.release }}</span>
+                            </div>
                         </div>
-                        <button onclick='quickAdd({{ up.title|tojson }}, "Upcoming", {{ up.poster|tojson }})' class="btn-app" style="margin-top:6px; padding:6px; font-size:0.68rem; pointer-events:auto;">+ Add to List</button>
                     </div>
-                </div>
                 {% endfor %}
             </div>
         </div>
 
-        <!-- Section: Recommendations -->
-        <div id="section-recommended" style="display: none;">
+        <!-- TAB 5: DATA -->
+        <div id="data-view" class="tab-content">
             <div class="app-title-bar">
-                <h2>Top Rated Movies</h2>
-                <span style="font-size: 0.72rem; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted);">FEATURED SELECTIONS</span>
+                <h2>Manage Data</h2>
             </div>
-            <div class="app-grid">
-                {% for rec in recommendations %}
-                <div class="app-card">
-                    <img src="{{ rec.poster }}" alt="{{ rec.title }}" referrerpolicy="no-referrer">
-                    <div class="card-overlay">
-                        <div class="card-title">{{ rec.title }}</div>
-                        <div class="card-meta">
-                            <span>{{ rec.genre }}</span>
-                            <span class="score-star">⭐ {{ rec.score }}</span>
-                        </div>
-                        <button onclick='quickAdd({{ rec.title|tojson }}, {{ rec.genre|tojson }}, {{ rec.poster|tojson }})' class="btn-app" style="margin-top:6px; padding:6px; font-size:0.68rem; pointer-events:auto;">+ Add to List</button>
-                    </div>
+            <div style="background: var(--card-bg); border: 1px solid var(--border); padding: 24px; max-width: 500px;">
+                <h3 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 12px;">Export Backup</h3>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 18px;">Download your collection backup in CSV format.</p>
+                <a href="/export_csv" class="btn-app">DOWNLOAD CSV</a>
+            </div>
+        </div>
+
+        <!-- TAB 6: SETTINGS -->
+        <div id="settings-view" class="tab-content">
+            <div class="app-title-bar">
+                <h2>Account Settings</h2>
+            </div>
+            <div style="background: var(--card-bg); border: 1px solid var(--border); padding: 24px; max-width: 500px;">
+                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Theme Appearance</label>
+                <div class="theme-selector">
+                    <button type="button" class="theme-btn" id="theme-btn-light" onclick="setTheme('light')">Light</button>
+                    <button type="button" class="theme-btn" id="theme-btn-dim" onclick="setTheme('dim')">Dim</button>
+                    <button type="button" class="theme-btn" id="theme-btn-dark" onclick="setTheme('dark')">Dark</button>
                 </div>
-                {% endfor %}
+
+                <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+
+                <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);">Account Actions</label>
+                <div style="margin-top: 12px;">
+                    <a href="/logout" class="btn-secondary-app" style="color: #dc2626; border-color: #dc2626; text-decoration: none;">LOG OUT OF ACCOUNT</a>
+                </div>
             </div>
         </div>
 
     </div>
 
-    <!-- Edit/Add Modal -->
-    <div id="movieModal" class="modal-overlay">
-        <div class="modal-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                <h3 id="modalHeaderTitle" style="margin:0; font-weight:300; font-size:1.4rem;">Add Movie</h3>
-                <button onclick="closeModal()" style="background:none; border:none; color:var(--text-primary); font-size:1.2rem; cursor:pointer;">✕</button>
-            </div>
-
-            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                <input type="text" id="searchQuery" placeholder="Search title for poster..." style="margin:0;">
-                <button type="button" onclick="searchPoster()" class="btn-app" style="white-space:nowrap;">Search</button>
-            </div>
-            <div id="searchResults" style="display:none; gap:8px; overflow-x:auto; padding-bottom:8px;"></div>
-
-            <form action="/add" method="POST">
-                <input type="hidden" name="movie_id" id="movieId">
-                <input type="text" name="title" id="movieTitle" placeholder="Movie Title" required>
-                <input type="text" name="genre" id="movieGenre" placeholder="Genre">
-                <input type="url" name="poster_url" id="moviePoster" placeholder="Poster Image URL">
-
-                <label style="font-size:0.75rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted);">Status</label>
-                <select name="status" id="movieStatus">
-                    <option value="Watching">Watching</option>
-                    <option value="Completed">Completed</option>
-                    <option value="On Hold">On Hold</option>
-                    <option value="Plan to Watch" selected>Plan to Watch</option>
-                    <option value="Dropped">Dropped</option>
+    <!-- Add Movie Modal -->
+    <div id="addModal" class="modal-backdrop">
+        <div class="modal-content">
+            <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 16px;">Add Movie to Vault</h3>
+            <form method="POST" action="/add_movie">
+                <input type="text" name="title" class="app-input" placeholder="Movie Title" required style="margin-bottom: 12px;">
+                <input type="text" name="genre" class="app-input" placeholder="Genre (e.g. Sci-Fi)" style="margin-bottom: 12px;">
+                <select name="status" class="app-select" style="margin-bottom: 12px;">
+                    <option value="WATCHED">WATCHED</option>
+                    <option value="PLAN TO WATCH">PLAN TO WATCH</option>
                 </select>
-
-                <label style="font-size:0.75rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted);">Score / Rating</label>
-                <select name="score" id="movieScore">
-                    <option value="0">Unrated</option>
-                    <option value="10">⭐ 10 / 10 (Masterpiece)</option>
-                    <option value="9">⭐ 9 / 10 (Great)</option>
-                    <option value="8">⭐ 8 / 10 (Very Good)</option>
-                    <option value="7">⭐ 7 / 10 (Good)</option>
-                    <option value="6">⭐ 6 / 10 (Fine)</option>
-                    <option value="5">⭐ 5 / 10 (Average)</option>
-                    <option value="4">⭐ 4 / 10 (Bad)</option>
-                    <option value="3">⭐ 3 / 10 (Very Bad)</option>
-                    <option value="2">⭐ 2 / 10 (Horrible)</option>
-                    <option value="1">⭐ 1 / 10 (Appalling)</option>
-                </select>
-
-                <label style="font-size:0.75rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted);">Personal Review & Notes</label>
-                <textarea name="comments" id="movieComments" rows="3" placeholder="Write your thoughts, comments, or movie notes here..."></textarea>
-
-                <button type="submit" class="btn-app" style="width: 100%; margin-top: 6px; padding: 14px;">Save Title</button>
+                <input type="number" name="score" class="app-input" placeholder="Score (0 - 10)" min="0" max="10" style="margin-bottom: 12px;">
+                <input type="text" name="poster_url" class="app-input" placeholder="Poster URL (Optional)" style="margin-bottom: 18px;">
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn-secondary-app" onclick="closeAddModal()">CANCEL</button>
+                    <button type="submit" class="btn-app">SAVE MOVIE</button>
+                </div>
             </form>
         </div>
     </div>
 
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav-bar">
+        <button class="nav-tab active" id="tab-collection" onclick="switchTab('collection')">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>Vault</span>
+        </button>
+        <button class="nav-tab" id="tab-search" onclick="switchTab('search')">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+        </button>
+        <button class="nav-tab" id="tab-news" onclick="switchTab('news')">
+            <svg viewBox="0 0 24 24"><path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10l5 5v11a2 2 0 0 1-2 2z"/></svg>
+            <span>News</span>
+        </button>
+        <button class="nav-tab" id="tab-upcoming" onclick="switchTab('upcoming')">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
+            <span>Upcoming</span>
+        </button>
+        <button class="nav-tab" id="tab-data" onclick="switchTab('data')">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/></svg>
+            <span>Data</span>
+        </button>
+        <button class="nav-tab" id="tab-settings" onclick="switchTab('settings')">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Settings</span>
+        </button>
+    </nav>
+"""
+APP_TEMPLATE += """
     <script>
-    function switchNavTab(tab) {
-        document.getElementById('section-library').style.display = 'none';
-        document.getElementById('section-news').style.display = 'none';
-        document.getElementById('section-recommended').style.display = 'none';
-        document.getElementById('section-upcoming').style.display = 'none';
-        const searchSec = document.getElementById('section-search');
-        if(searchSec) searchSec.style.display = 'none';
+        function switchTab(tabId) {
+            const allTabs = document.querySelectorAll('.tab-content');
+            allTabs.forEach(tab => tab.classList.remove('active'));
 
-        document.getElementById('tab-library').classList.remove('active');
-        document.getElementById('tab-news').classList.remove('active');
-        document.getElementById('tab-recommended').classList.remove('active');
-        document.getElementById('tab-upcoming').classList.remove('active');
-        const searchTab = document.getElementById('tab-search');
-        if(searchTab) searchTab.classList.remove('active');
+            const allBtns = document.querySelectorAll('.nav-tab');
+            allBtns.forEach(btn => btn.classList.remove('active'));
 
-        document.getElementById('section-' + tab).style.display = 'block';
-        document.getElementById('tab-' + tab).classList.add('active');
-    }
+            const targetTab = document.getElementById(tabId + '-view');
+            const targetBtn = document.getElementById('tab-' + tabId);
 
-    function setView(view) {
-        if (view === 'grid') {
-            document.getElementById('view-grid').style.display = 'grid';
-            document.getElementById('view-list').style.display = 'none';
-            document.getElementById('btn-grid-view').classList.add('active');
-            document.getElementById('btn-list-view').classList.remove('active');
-        } else {
-            document.getElementById('view-grid').style.display = 'none';
-            document.getElementById('view-list').style.display = 'block';
-            document.getElementById('btn-list-view').classList.add('active');
-            document.getElementById('btn-grid-view').classList.remove('active');
+            if (targetTab) targetTab.classList.add('active');
+            if (targetBtn) targetBtn.classList.add('active');
+
+            localStorage.setItem('active_tab', tabId);
         }
-    }
 
-    function openModal() {
-        document.getElementById('modalHeaderTitle').innerText = "Add Movie";
-        document.getElementById('movieId').value = "";
-        document.getElementById('movieTitle').value = "";
-        document.getElementById('movieGenre').value = "";
-        document.getElementById('moviePoster').value = "";
-        document.getElementById('movieComments').value = "";
-        document.getElementById('movieModal').style.display = 'flex';
-    }
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('user_theme', theme);
 
-    function closeModal() {
-        document.getElementById('movieModal').style.display = 'none';
-    }
-
-    function editMovie(id, title, genre, status, score, poster, comments) {
-        document.getElementById('modalHeaderTitle').innerText = "Edit Movie";
-        document.getElementById('movieId').value = id;
-        document.getElementById('movieTitle').value = title;
-        document.getElementById('movieGenre').value = genre || '';
-        document.getElementById('movieStatus').value = status;
-        document.getElementById('movieScore').value = score;
-        document.getElementById('moviePoster').value = poster || '';
-        document.getElementById('movieComments').value = comments || '';
-        document.getElementById('movieModal').style.display = 'flex';
-    }
-
-    function quickAdd(title, genre, poster) {
-        openModal();
-        document.getElementById('movieTitle').value = title;
-        document.getElementById('movieGenre').value = genre;
-        document.getElementById('moviePoster').value = poster;
-    }
-
-    async function searchPoster() {
-        const query = document.getElementById('searchQuery').value.trim();
-        const results = document.getElementById('searchResults');
-        if (!query) return;
-
-        results.style.display = 'flex';
-        results.innerHTML = '<span style="font-size:0.8rem; color:var(--text-muted);">Searching...</span>';
-
-        try {
-            const res = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=movie&country=US&limit=4');
-            const data = await res.json();
-            results.innerHTML = '';
-
-            let items = data.results || [];
-            if (items.length === 0 && query.toLowerCase().includes('avengers')) {
-                items = [
-                    { trackName: "The Avengers", primaryGenreName: "Action", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/8/8a/The_Avengers_%282012_film%29_poster.jpg" },
-                    { trackName: "Avengers: Endgame", primaryGenreName: "Action", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/0/0d/Avengers_Endgame_poster.jpg" }
-                ];
-            }
-
-            items.forEach(item => {
-                const posterUrl = item.artworkUrl100 ? item.artworkUrl100.replace('100x100bb', '600x600bb') : '';
-                const div = document.createElement('div');
-                div.style.cssText = 'cursor:pointer; flex-shrink:0; width:75px; text-align:center; font-size:0.7rem;';
-                div.innerHTML = '<img src="' + posterUrl + '" style="width:100%; height:100px; object-fit:cover; border-radius:2px;"><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;">' + item.trackName + '</div>';
-                div.onclick = () => {
-                    document.getElementById('movieTitle').value = item.trackName;
-                    document.getElementById('movieGenre').value = item.primaryGenreName || '';
-                    document.getElementById('moviePoster').value = posterUrl;
-                    results.style.display = 'none';
-                };
-                results.appendChild(div);
-            });
-        } catch (e) {
-            results.innerHTML = '<span style="font-size:0.8rem; color:#dc2626;">Failed to load posters</span>';
+            document.querySelectorAll('.theme-btn').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = document.getElementById('theme-btn-' + theme);
+            if (activeBtn) activeBtn.classList.add('active');
         }
-    }
 
-    async function performLiveSearch() {
-        const query = document.getElementById('liveSearchInput').value.trim();
-        const resultsContainer = document.getElementById('liveSearchResults');
-        if (!query) return;
+        function openAddModal() {
+            document.getElementById('addModal').style.display = 'flex';
+        }
 
-        resultsContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 40px 0;">Searching database...</div>';
+        function closeAddModal() {
+            document.getElementById('addModal').style.display = 'none';
+        }
 
-        try {
-            const res = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=movie&country=US&limit=12');
-            const data = await res.json();
+        function executeTmdbSearch() {
+            const query = document.getElementById('tmdb-search-input').value.trim();
+            if (!query) return;
 
-            let items = data.results || [];
+            const container = document.getElementById('tmdb-search-results');
+            container.innerHTML = '<p style="color:var(--text-muted); grid-column: 1/-1;">Searching...</p>';
 
-            if (items.length === 0) {
-                const qLower = query.toLowerCase();
-                if (qLower.includes('avengers')) {
-                    items = [
-                        { trackName: "The Avengers", releaseDate: "2012-05-04", primaryGenreName: "Action", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/8/8a/The_Avengers_%282012_film%29_poster.jpg" },
-                        { trackName: "Avengers: Endgame", releaseDate: "2019-04-26", primaryGenreName: "Action", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/0/0d/Avengers_Endgame_poster.jpg" },
-                        { trackName: "Avengers: Infinity War", releaseDate: "2018-04-27", primaryGenreName: "Action", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/4/4d/Avengers_Infinity_War_poster.jpg" }
-                    ];
-                } else if (qLower.includes('spider')) {
-                    items = [
-                        { trackName: "Spider-Man: Across the Spider-Verse", releaseDate: "2023-06-02", primaryGenreName: "Animation", artworkUrl100: "https://upload.wikimedia.org/wikipedia/en/b/b4/Spider-Man-_Across_the_Spider-Verse_poster.jpg" }
-                    ];
-                }
-            }
-
-            resultsContainer.innerHTML = '';
-
-            if (items.length === 0) {
-                resultsContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: var(--text-muted); padding: 40px 0;">No matching movies found.</div>';
-                return;
-            }
-
-            items.forEach(item => {
-                const posterUrl = item.artworkUrl100 ? item.artworkUrl100.replace('100x100bb', '600x600bb') : '';
-                const title = item.trackName || 'Untitled';
-                const genre = item.primaryGenreName || 'Cinema';
-                const releaseYear = item.releaseDate ? item.releaseDate.substring(0, 4) : '';
-
-                const card = document.createElement('div');
-                card.className = 'app-card';
-                card.innerHTML = `
-                    <img src="${posterUrl}" alt="${title}" referrerpolicy="no-referrer">
-                    <div class="card-overlay">
-                        <div class="card-title">${title} (${releaseYear})</div>
-                        <div class="card-meta">
-                            <span>${genre}</span>
+            fetch('/api/search?q=' + encodeURIComponent(query))
+                .then(res => res.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        container.innerHTML = '<p style="color:var(--text-muted); grid-column: 1/-1;">No results found.</p>';
+                        return;
+                    }
+                    container.innerHTML = data.map(m => `
+                        <div class="app-card">
+                            <img src="${m.poster}" alt="${m.title}">
+                            <div class="card-overlay">
+                                <div class="card-title">${m.title}</div>
+                                <div class="card-meta">
+                                    <span>${m.release}</span>
+                                    <span>★ ${m.score}</span>
+                                </div>
+                            </div>
                         </div>
-                        <button onclick='quickAdd(${JSON.stringify(title)}, ${JSON.stringify(genre)}, ${JSON.stringify(posterUrl)})' class="btn-app" style="margin-top:6px; padding:6px; font-size:0.68rem; pointer-events:auto;">+ Track Movie</button>
-                    </div>
-                `;
-                resultsContainer.appendChild(card);
-            });
-        } catch (e) {
-            resultsContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #dc2626; padding: 40px 0;">Failed to fetch search results.</div>';
+                    `).join('');
+                })
+                .catch(() => {
+                    container.innerHTML = '<p style="color:var(--text-muted); grid-column: 1/-1;">Error loading results.</p>';
+                });
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('user_theme') || 'light';
+            setTheme(savedTheme);
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const tabParam = urlParams.get('tab');
+            const savedTab = tabParam || localStorage.getItem('active_tab') || 'collection';
+            switchTab(savedTab);
+        });
+    </script>
+</body>
+</html>
+"""
+AUTH_CSS = """
+<style>
+    body {
+        display: flex; justify-content: center; align-items: center;
+        min-height: 100vh; background: var(--bg); color: var(--text-primary);
     }
+    .auth-card {
+        background: var(--card-bg); border: 1px solid var(--border);
+        padding: 36px; width: 100%; max-width: 380px; text-align: center;
+    }
+    .auth-card h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 20px; letter-spacing: 1px; }
+    .auth-card input { margin-bottom: 14px; }
+    .auth-card button { width: 100%; padding: 12px; margin-top: 6px; }
+    .auth-link { display: block; margin-top: 18px; font-size: 0.75rem; color: var(--text-muted); text-decoration: none; }
+    .error-banner { background: rgba(220, 38, 38, 0.1); color: #dc2626; border: 1px solid #dc2626; padding: 10px; font-size: 0.75rem; margin-bottom: 16px; }
+</style>
+"""
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8"><title>Login — The List</title>
+    """ + BASE_CSS + AUTH_CSS + """
+</head>
+<body>
+    <div class="auth-card">
+        <div style="margin-bottom: 16px;">""" + LOGO_SVG + """</div>
+        <h2>LOG IN</h2>
+        {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+        <form method="POST" action="/login">
+            <input type="text" name="username" class="app-input" placeholder="USERNAME" required>
+            <input type="password" name="password" class="app-input" placeholder="PASSWORD" required>
+            <button type="submit" class="btn-app">SIGN IN</button>
+        </form>
+        <a href="/register" class="auth-link">Need an account? Register here</a>
+    </div>
+    <script>
+        document.documentElement.setAttribute('data-theme', localStorage.getItem('user_theme') || 'light');
     </script>
 </body>
 </html>
 """
 
-# App Routes
-@app.route("/")
+REGISTER_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8"><title>Register — The List</title>
+    """ + BASE_CSS + AUTH_CSS + """
+</head>
+<body>
+    <div class="auth-card">
+        <div style="margin-bottom: 16px;">""" + LOGO_SVG + """</div>
+        <h2>CREATE ACCOUNT</h2>
+        {% if error %}<div class="error-banner">{{ error }}</div>{% endif %}
+        <form method="POST" action="/register">
+            <input type="text" name="username" class="app-input" placeholder="USERNAME" required>
+            <input type="password" name="password" class="app-input" placeholder="PASSWORD" required>
+            <button type="submit" class="btn-app">REGISTER</button>
+        </form>
+        <a href="/login" class="auth-link">Already registered? Log in here</a>
+    </div>
+    <script>
+        document.documentElement.setAttribute('data-theme', localStorage.getItem('user_theme') || 'light');
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/')
 def index():
-    if "user_id" not in session:
-        return render_template_string(LANDING_TEMPLATE)
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
 
-    filter_status = request.args.get("filter", "All")
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    if filter_status == "All":
-        cursor.execute("SELECT id, title, genre, status, score, poster_url, comments FROM movies WHERE user_id = ?", (session["user_id"],))
-    else:
-        cursor.execute("SELECT id, title, genre, status, score, poster_url, comments FROM movies WHERE user_id = ? AND status = ?", (session["user_id"], filter_status))
-
-    movies = cursor.fetchall()
-    conn.close()
-
-    news_items = fetch_movie_news()
-    upcoming = fetch_upcoming_movies()
-    recommendations = fetch_recommended_movies()
-
-    return render_template_string(
-        MAIN_TEMPLATE,
-        movies=movies,
-        username=session["username"],
-        current_filter=filter_status,
-        recommendations=recommendations,
-        upcoming=upcoming,
-        news_items=news_items,
-    )
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    error = None
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        if username and password:
-            hashed_pwd = generate_password_hash(password)
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            try:
-                cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_pwd))
-                conn.commit()
-                conn.close()
-                return redirect(url_for("login"))
-            except sqlite3.IntegrityError:
-                conn.close()
-                error = "Username already exists."
-
-    return render_template_string(AUTH_TEMPLATE, title="Register", error=error)
-
-@app.route("/login", methods=["GET", "POST"])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    error = None
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, password FROM users WHERE username = ?", (username,))
-        user = cursor.fetchone()
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         conn.close()
 
-        if user and check_password_hash(user["password"], password):
-            session["user_id"] = user["id"]
-            session["username"] = username
-            return redirect(url_for("index"))
-        else:
-            error = "Invalid credentials."
+        if user and check_password_hash(user['password'], password):
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            return redirect(url_for('dashboard'))
+        
+        return render_template_string(LOGIN_TEMPLATE, error="Invalid username or password.")
+    return render_template_string(LOGIN_TEMPLATE)
 
-    return render_template_string(AUTH_TEMPLATE, title="Login", error=error)
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
 
-@app.route("/logout")
+        if not username or not password:
+            return render_template_string(REGISTER_TEMPLATE, error="All fields are required.")
+
+        hashed_password = generate_password_hash(password)
+        conn = get_db_connection()
+        try:
+            conn.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+            conn.commit()
+            conn.close()
+            return redirect(url_for('login'))
+        except sqlite3.IntegrityError:
+            conn.close()
+            return render_template_string(REGISTER_TEMPLATE, error="Username already taken.")
+
+    return render_template_string(REGISTER_TEMPLATE)
+
+@app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for('login'))
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
 
-@app.route("/add", methods=["POST"])
-def add():
-    if "user_id" not in session:
-        return redirect(url_for("login"))
+    user_id = session['user_id']
+    status_filter = request.args.get('status', 'ALL')
+    genre_filter = request.args.get('genre', 'ALL')
+    sort_filter = request.args.get('sort', 'TITLE')
 
-    movie_id = request.form.get("movie_id")
-    title = request.form.get("title")
-    genre = request.form.get("genre", "")
-    status = request.form.get("status")
-    score = int(request.form.get("score", 0))
-    poster_url = request.form.get("poster_url", "").strip()
-    comments = request.form.get("comments", "").strip()
+    conn = get_db_connection()
+
+    # Query setup
+    query = "SELECT * FROM movies WHERE user_id = ?"
+    params = [user_id]
+
+    if status_filter != 'ALL':
+        query += " AND status = ?"
+        params.append(status_filter)
+
+    if genre_filter != 'ALL':
+        query += " AND genre = ?"
+        params.append(genre_filter)
+
+    if sort_filter == 'SCORE':
+        query += " ORDER BY score DESC"
+    else:
+        query += " ORDER BY title ASC"
+
+    user_movies = conn.execute(query, params).fetchall()
+
+    # Get unique genres
+    genres_query = conn.execute("SELECT DISTINCT genre FROM movies WHERE user_id = ? AND genre != ''", (user_id,)).fetchall()
+    genres = [row['genre'] for row in genres_query]
+
+    conn.close()
+
+    news_feed = fetch_movie_news()
+    upcoming_movies = fetch_upcoming_movies()
+
+    return render_template_string(
+        APP_TEMPLATE,
+        user_movies=user_movies,
+        genres=genres,
+        current_status=status_filter,
+        current_genre=genre_filter,
+        current_sort=sort_filter,
+        news_feed=news_feed,
+        upcoming_movies=upcoming_movies
+    )
+
+@app.route('/add_movie', methods=['POST'])
+def add_movie():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    user_id = session['user_id']
+    title = request.form.get('title', '').strip()
+    genre = request.form.get('genre', '').strip()
+    status = request.form.get('status', 'WATCHED')
+    score = request.form.get('score', 0)
+    poster_url = request.form.get('poster_url', '').strip()
 
     if title:
         conn = get_db_connection()
-        cursor = conn.cursor()
-
-        if movie_id:
-            cursor.execute(
-                "UPDATE movies SET title = ?, genre = ?, status = ?, score = ?, poster_url = ?, comments = ? WHERE id = ? AND user_id = ?",
-                (title, genre, status, score, poster_url, comments, movie_id, session["user_id"]),
-            )
-        else:
-            cursor.execute(
-                "INSERT INTO movies (user_id, title, genre, status, score, poster_url, comments) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session["user_id"], title, genre, status, score, poster_url, comments),
-            )
-
+        conn.execute(
+            "INSERT INTO movies (user_id, title, genre, status, score, poster_url) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, title, genre, status, score, poster_url)
+        )
         conn.commit()
         conn.close()
 
-    return redirect(url_for("index"))
+    return redirect(url_for('dashboard', tab='collection'))
 
-@app.route("/delete/<int:movie_id>")
-def delete(movie_id):
-    if "user_id" not in session:
-        return redirect(url_for("login"))
+@app.route('/api/search')
+def api_search():
+    if 'user_id' not in session:
+        return jsonify([])
 
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify([])
+
+    results = fetch_tmdb_movies(query)
+    return Response(json.dumps(results), mimetype='application/json')
+
+@app.route('/export_csv')
+def export_csv():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    user_id = session['user_id']
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM movies WHERE id = ? AND user_id = ?", (movie_id, session["user_id"]))
-    conn.commit()
+    movies = conn.execute("SELECT title, genre, status, score FROM movies WHERE user_id = ?", (user_id,)).fetchall()
     conn.close()
 
-    return redirect(url_for("index"))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Title', 'Genre', 'Status', 'Score'])
 
-if __name__ == "__main__":
-    app.run()
+    for m in movies:
+        writer.writerow([m['title'], m['genre'], m['status'], m['score']])
 
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-disposition": "attachment; filename=my_movie_collection.csv"}
+    )
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
